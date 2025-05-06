@@ -29,6 +29,7 @@ ELIMINA_PARTITA_SELEZIONE = 8
 
 # ------ DATABASE ------
 def init_db():
+    # Solo crea le tabelle se non esistono, MAI DROP o DELETE!
     conn = sqlite3.connect('calcetto.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS giocatori (id INTEGER PRIMARY KEY, nome TEXT UNIQUE)''')
@@ -82,6 +83,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/nuovapartita - Inserisci una nuova partita\n"
         "/statistiche - Statistiche avanzate\n"
         "/partita - Estrai una partita per data\n"
+        "/partite - Vedi tutte le partite\n"
         "/elimina_partita - Elimina una partita\n"
         "/modifica_partita - Modifica una partita\n"
         "❗️ Il formato data è GG/MM/AAAA"
@@ -166,7 +168,6 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nome_id = {nome: gid for gid, nome in giocatori}
         giocatore_partite = defaultdict(list)
         for pr in prestazioni:
-            # pr: id, partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta
             giocatore_partite[pr[2]].append(pr)
 
         # Calcolo compagni e avversari
@@ -177,7 +178,6 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for pr in partite_giocatore:
                 partita_id = pr[1]
                 squadra_gioc = pr[3]
-                # Trova tutti i presenti nella stessa partita
                 prs = [p for p in prestazioni if p[1] == partita_id]
                 for p in prs:
                     if p[2] == gid:
@@ -214,13 +214,11 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Vittorie", "%Vitt", "Pareggi", "%Par", "Sconfitte", "%Sco", 
             "Top Compagni", "Top Avversari"
         ]
-        # Genera PDF
         filename = "statistiche_avanzate.pdf"
         genera_pdf_avanzato([header]+statistiche, filename)
         # Genera TXT partite singole
         partite_lines = []
         for p in partite:
-            # p: id, data, squadra_a, squadra_b, risultato
             partite_lines.append(
                 f"{p[1]} | Risultato: {p[4]} | Squadra A: {p[2]} | Squadra B: {p[3]}"
             )
@@ -228,7 +226,6 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt_filename = "partite.txt"
         with open(txt_filename, "w", encoding="utf-8") as f:
             f.write(partite_txt)
-        # Invio
         if len(statistiche) == 0:
             await update.message.reply_text("Nessuna statistica disponibile. Inserisci almeno una partita!")
             return
@@ -296,6 +293,33 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
         testo += f"{r[0]} (Squadra {r[1]}): Gol {r[2]}, Assist {r[3]}\n"
     await update.message.reply_text(testo)
     return ConversationHandler.END
+
+# ---- Lista TUTTE le partite ----
+async def tutte_le_partite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect('calcetto.db')
+    c = conn.cursor()
+    c.execute('SELECT data, squadra_a, squadra_b, risultato FROM partite ORDER BY data')
+    partite = c.fetchall()
+    conn.close()
+    if not partite:
+        await update.message.reply_text("Nessuna partita registrata.")
+        return
+    lines = []
+    for p in partite:
+        lines.append(
+            f"{p[0]} | Risultato: {p[3]} | Squadra A: {p[1]} | Squadra B: {p[2]}"
+        )
+    testo = "\n".join(lines)
+    # Telegram limita i messaggi a 4096 caratteri. Se si supera, invia come file
+    if len(testo) > 4000:
+        with open("tutte_le_partite.txt", "w", encoding="utf-8") as f:
+            f.write(testo)
+        await update.message.reply_document(
+            document=InputFile(open("tutte_le_partite.txt", "rb"), filename="tutte_le_partite.txt"),
+            caption="Elenco completo partite"
+        )
+    else:
+        await update.message.reply_text("Ecco la lista di tutte le partite giocate:\n\n" + testo)
 
 # ---- Elimina partita ----
 async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -493,6 +517,7 @@ def main():
     app.add_handler(conv_nuova)
     app.add_handler(CommandHandler('statistiche', statistiche))
     app.add_handler(conv_partita)
+    app.add_handler(CommandHandler('partite', tutte_le_partite))
     app.add_handler(conv_elimina)
     app.add_handler(CallbackQueryHandler(elimina_partita_callback, pattern="^del_"))
     app.add_handler(conv_modifica)
