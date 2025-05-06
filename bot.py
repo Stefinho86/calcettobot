@@ -91,6 +91,9 @@ def valida_data(data_str):
     except Exception:
         return None
 
+def is_annulla(msg):
+    return msg and msg.strip().lower() in ('annulla', '/annulla')
+
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
@@ -121,6 +124,8 @@ async def aggiungi_giocatore(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return AGGIUNGI_GIOCATORE
 
 async def aggiungi_giocatore_salva(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_annulla(update.message.text):
+        return await annulla(update, context)
     testo = update.message.text
     nomi = [n.strip() for n in testo.split(',') if n.strip()]
     if not nomi:
@@ -149,7 +154,7 @@ async def nuova_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SQUADRE
 
 async def squadre(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text and update.message.text.strip().lower() == '/annulla':
+    if is_annulla(update.message.text):
         return await annulla(update, context)
     giocatori_registrati = context.user_data.get('giocatori_registrati', set())
     if context.user_data['step'] == 0:
@@ -182,7 +187,7 @@ async def squadre(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return DATA
 
 async def data_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text and update.message.text.strip().lower() == '/annulla':
+    if is_annulla(update.message.text):
         return await annulla(update, context)
     data_str = update.message.text.strip()
     data_valida = valida_data(data_str)
@@ -194,21 +199,21 @@ async def data_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return RISULTATO
 
 async def risultato(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text and update.message.text.strip().lower() == '/annulla':
+    if is_annulla(update.message.text):
         return await annulla(update, context)
     context.user_data['risultato'] = update.message.text
     await update.message.reply_text("Inserisci i marcatori (es. Rossi:2, Bianchi:1, Verdi:2):")
     return GOL
 
 async def gol(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text and update.message.text.strip().lower() == '/annulla':
+    if is_annulla(update.message.text):
         return await annulla(update, context)
     context.user_data['gol'] = update.message.text
     await update.message.reply_text("Inserisci gli assist (es. Neri:1, Rossi:2, Verdi:1):")
     return ASSIST
 
 async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text and update.message.text.strip().lower() == '/annulla':
+    if is_annulla(update.message.text):
         return await annulla(update, context)
     context.user_data['assist'] = update.message.text
     squadra = set(context.user_data['squadra_a'] + context.user_data['squadra_b'])
@@ -377,7 +382,7 @@ def genera_pdf_partite(data, filename):
     table = Table(
         data,
         repeatRows=1,
-        colWidths=[60, 180, 180, 60, 110, 110],  # colonne larghe per squadre
+        colWidths=[60, 180, 180, 60, 110, 110],
         splitByRow=1
     )
     table.setStyle(style)
@@ -417,6 +422,8 @@ async def partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return 20
 
 async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_annulla(update.message.text):
+        return await annulla(update, context)
     data_richiesta = update.message.text.strip()
     data_valida = valida_data(data_richiesta)
     if not data_valida:
@@ -449,6 +456,8 @@ async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ELIMINA_PARTITA_SELEZIONE
 
 async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_annulla(update.message.text):
+        return await annulla(update, context)
     data_richiesta = update.message.text.strip()
     data_valida = valida_data(data_richiesta)
     if not data_valida:
@@ -491,6 +500,8 @@ async def modifica_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MODIFICA_PARTITA_SELEZIONE
 
 async def modifica_partita_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_annulla(update.message.text):
+        return await annulla(update, context)
     data_richiesta = update.message.text.strip()
     data_valida = valida_data(data_richiesta)
     if not data_valida:
@@ -542,6 +553,8 @@ async def modifica_campo_callback(update: Update, context: ContextTypes.DEFAULT_
     return MODIFICA_VALORE
 
 async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_annulla(update.message.text):
+        return await annulla(update, context)
     campo = context.user_data['campo_modifica']
     partita_id = context.user_data['modifica_id']
     nuovo_valore = update.message.text.strip()
@@ -600,7 +613,7 @@ def main():
             GOL: [MessageHandler(filters.TEXT, gol)],
             ASSIST: [MessageHandler(filters.TEXT, assist)],
         },
-        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.Regex(r'^/annulla$'), annulla)],
+        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.TEXT, annulla)],
         allow_reentry=True
     )
 
@@ -609,7 +622,7 @@ def main():
         states={
             AGGIUNGI_GIOCATORE: [MessageHandler(filters.TEXT, aggiungi_giocatore_salva)],
         },
-        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.Regex(r'^/annulla$'), annulla)],
+        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.TEXT, annulla)],
         allow_reentry=True
     )
 
@@ -618,7 +631,7 @@ def main():
         states={
             20: [MessageHandler(filters.TEXT, mostra_partita)],
         },
-        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.Regex(r'^/annulla$'), annulla)],
+        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.TEXT, annulla)],
         allow_reentry=True
     )
 
@@ -627,7 +640,7 @@ def main():
         states={
             ELIMINA_PARTITA_SELEZIONE: [MessageHandler(filters.TEXT, elimina_partita_data)],
         },
-        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.Regex(r'^/annulla$'), annulla)],
+        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.TEXT, annulla)],
         allow_reentry=True
     )
 
@@ -638,7 +651,7 @@ def main():
             MODIFICA_CAMPO: [CallbackQueryHandler(modifica_campo_callback)],
             MODIFICA_VALORE: [MessageHandler(filters.TEXT, modifica_valore)],
         },
-        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.Regex(r'^/annulla$'), annulla)],
+        fallbacks=[CommandHandler('annulla', annulla), MessageHandler(filters.TEXT, annulla)],
         allow_reentry=True
     )
 
@@ -655,7 +668,7 @@ def main():
     app.add_handler(conv_modifica)
     app.add_handler(CallbackQueryHandler(modifica_partita_callback, pattern="^mod_"))
     app.add_handler(CommandHandler('annulla', annulla))
-    app.add_handler(MessageHandler(filters.Regex(r'^/annulla$'), annulla))
+    app.add_handler(MessageHandler(filters.TEXT, annulla))
 
     app.run_polling()
 
