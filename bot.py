@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from datetime import datetime
 from telegram import (
     Update, 
     InputFile, 
@@ -63,6 +64,14 @@ def parse_stats(s):
             d[nome.strip()] = int(num)
     return d
 
+def valida_data(data_str):
+    try:
+        # Prova a convertire GG/MM/AAAA in datetime
+        dt = datetime.strptime(data_str, "%d/%m/%Y")
+        return dt.strftime("%d/%m/%Y")
+    except Exception:
+        return None
+
 # ------ BOT HANDLERS ------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -73,7 +82,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/partita - Estrai una partita per data\n"
         "/elimina_partita - Elimina una partita\n"
         "/modifica_partita - Modifica una partita\n"
-        "Puoi usare questi comandi anche nei gruppi!"
+        "Puoi usare questi comandi anche nei gruppi!\n"
+        "❗️ Il formato data ora è GG/MM/AAAA"
     )
     await update.message.reply_text(text)
 
@@ -94,11 +104,16 @@ async def squadre(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SQUADRE
     else:
         context.user_data['squadra_b'] = [n.strip() for n in update.message.text.split(',')]
-        await update.message.reply_text("Inserisci la data della partita (YYYY-MM-DD):")
+        await update.message.reply_text("Inserisci la data della partita (GG/MM/AAAA):")
         return DATA
 
 async def data_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['data'] = update.message.text
+    data_str = update.message.text.strip()
+    data_valida = valida_data(data_str)
+    if not data_valida:
+        await update.message.reply_text("❌ Formato data non valido. Scrivi la data in formato GG/MM/AAAA (es: 04/04/2024):")
+        return DATA
+    context.user_data['data'] = data_valida
     await update.message.reply_text("Inserisci il risultato della partita (es. 5-4):")
     return RISULTATO
 
@@ -157,7 +172,7 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         genera_pdf(data, filename)
         with open(filename, "rb") as f:
             await update.message.reply_document(
-                document=InputFile(f, filename=filename, mimetype="application/pdf"),
+                document=InputFile(f, filename=filename),
                 caption="📊 Statistiche calcetto"
             )
         print("PDF inviato!")
@@ -172,29 +187,31 @@ def genera_pdf(data, filename):
 
 # ---- Estrai singola partita ----
 async def partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Inserisci la data della partita che vuoi visualizzare (YYYY-MM-DD):")
+    await update.message.reply_text("Inserisci la data della partita che vuoi visualizzare (GG/MM/AAAA):")
     return 20
 
 async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data_richiesta = update.message.text.strip()
+    data_valida = valida_data(data_richiesta)
+    if not data_valida:
+        await update.message.reply_text("❌ Formato data non valido. Scrivi la data in formato GG/MM/AAAA (es: 04/04/2024):")
+        return 20
     conn = sqlite3.connect('calcetto.db')
     c = conn.cursor()
-    c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_richiesta,))
+    c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_valida,))
     row = c.fetchone()
     if not row:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
         conn.close()
         return ConversationHandler.END
     partita_id, squadra_a, squadra_b, risultato = row
-    # Statistiche marcatori e assist
     c.execute('SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id WHERE partita_id = ?', (partita_id,))
     dettagli = c.fetchall()
     tabella = [['Nome', 'Squadra', 'Gol', 'Assist']]
     for nome, gol, assist, squadra in dettagli:
         tabella.append([nome, squadra, str(gol), str(assist)])
     conn.close()
-    # Costruisci testo riassuntivo
-    testo = f"📅 Partita del {data_richiesta}\nRisultato: {risultato}\nSquadra A: {squadra_a}\nSquadra B: {squadra_b}\n"
+    testo = f"📅 Partita del {data_valida}\nRisultato: {risultato}\nSquadra A: {squadra_a}\nSquadra B: {squadra_b}\n"
     testo += "\nMarcatori e assist:\n"
     for r in tabella[1:]:
         testo += f"{r[0]} (Squadra {r[1]}): Gol {r[2]}, Assist {r[3]}\n"
@@ -203,14 +220,18 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---- Elimina partita ----
 async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Inserisci la data della partita da eliminare (YYYY-MM-DD):")
+    await update.message.reply_text("Inserisci la data della partita da eliminare (GG/MM/AAAA):")
     return ELIMINA_PARTITA_SELEZIONE
 
 async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data_richiesta = update.message.text.strip()
+    data_valida = valida_data(data_richiesta)
+    if not data_valida:
+        await update.message.reply_text("❌ Formato data non valido. Scrivi la data in formato GG/MM/AAAA (es: 04/04/2024):")
+        return ELIMINA_PARTITA_SELEZIONE
     conn = sqlite3.connect('calcetto.db')
     c = conn.cursor()
-    c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_richiesta,))
+    c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_valida,))
     partite = c.fetchall()
     if not partite:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
@@ -242,14 +263,18 @@ async def elimina_partita_callback(update: Update, context: ContextTypes.DEFAULT
 
 # ---- Modifica partita ----
 async def modifica_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Inserisci la data della partita da modificare (YYYY-MM-DD):")
+    await update.message.reply_text("Inserisci la data della partita da modificare (GG/MM/AAAA):")
     return MODIFICA_PARTITA_SELEZIONE
 
 async def modifica_partita_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data_richiesta = update.message.text.strip()
+    data_valida = valida_data(data_richiesta)
+    if not data_valida:
+        await update.message.reply_text("❌ Formato data non valido. Scrivi la data in formato GG/MM/AAAA (es: 04/04/2024):")
+        return MODIFICA_PARTITA_SELEZIONE
     conn = sqlite3.connect('calcetto.db')
     c = conn.cursor()
-    c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_richiesta,))
+    c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_valida,))
     partite = c.fetchall()
     if not partite:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
