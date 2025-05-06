@@ -127,21 +127,43 @@ async def annulla(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---- Statistiche (PDF) ----
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect('calcetto.db')
-    c = conn.cursor()
-    c.execute('SELECT nome, COUNT(prestazioni.id), SUM(gol), SUM(assist), SUM(vittoria), SUM(pareggio), SUM(sconfitta) FROM giocatori LEFT JOIN prestazioni ON giocatori.id = prestazioni.giocatore_id GROUP BY nome')
-    rows = c.fetchall()
-    data = [['Nome', 'Presenze', 'Gol', 'Assist', 'Vittorie', 'Pareggi', 'Sconfitte']]
-    for row in rows:
-        data.append([str(x) if x is not None else '0' for x in row])
-    conn.close()
-    filename = "statistiche.pdf"
-    genera_pdf(data, filename)
-    with open(filename, "rb") as f:
-        await update.message.reply_document(
-            document=InputFile(f, filename=filename, mimetype="application/pdf"),
-            caption="📊 Statistiche calcetto"
-        )
+    try:
+        conn = sqlite3.connect('calcetto.db')
+        c = conn.cursor()
+        c.execute('''
+            SELECT nome, 
+                   COUNT(prestazioni.id) as presenze, 
+                   IFNULL(SUM(gol),0), 
+                   IFNULL(SUM(assist),0), 
+                   IFNULL(SUM(vittoria),0), 
+                   IFNULL(SUM(pareggio),0), 
+                   IFNULL(SUM(sconfitta),0)
+            FROM giocatori 
+            LEFT JOIN prestazioni ON giocatori.id = prestazioni.giocatore_id 
+            GROUP BY nome
+        ''')
+        rows = c.fetchall()
+        conn.close()
+        print("[DEBUG] Statistiche rows:", rows)
+        data = [['Nome', 'Presenze', 'Gol', 'Assist', 'Vittorie', 'Pareggi', 'Sconfitte']]
+        for row in rows:
+            data.append([str(x) if x is not None else '0' for x in row])
+
+        if len(data) == 1:
+            await update.message.reply_text("Nessuna statistica disponibile. Inserisci almeno una partita!")
+            return
+
+        filename = "statistiche.pdf"
+        genera_pdf(data, filename)
+        with open(filename, "rb") as f:
+            await update.message.reply_document(
+                document=InputFile(f, filename=filename, mimetype="application/pdf"),
+                caption="📊 Statistiche calcetto"
+            )
+        print("PDF inviato!")
+    except Exception as e:
+        print("[ERRORE]", e)
+        await update.message.reply_text("Si è verificato un errore nel generare il PDF: " + str(e))
 
 def genera_pdf(data, filename):
     doc = SimpleDocTemplate(filename, pagesize=letter)
@@ -181,7 +203,6 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---- Elimina partita ----
 async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Chiede la data e mostra le partite di quella data (potrebbero essercene più di una)
     await update.message.reply_text("Inserisci la data della partita da eliminare (YYYY-MM-DD):")
     return ELIMINA_PARTITA_SELEZIONE
 
@@ -195,7 +216,6 @@ async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
         conn.close()
         return ConversationHandler.END
-    # Se più partite, mostra pulsanti
     keyboard = [
         [InlineKeyboardButton(f"{p[1]} vs {p[2]} ({p[3]})", callback_data=f"del_{p[0]}")]
         for p in partite
@@ -252,7 +272,6 @@ async def modifica_partita_callback(update: Update, context: ContextTypes.DEFAUL
     if query.data.startswith("mod_"):
         partita_id = int(query.data.split("_")[1])
         context.user_data['modifica_id'] = partita_id
-        # Mostra le opzioni modificabili
         keyboard = [
             [InlineKeyboardButton("Squadra A", callback_data="campo_squadra_a")],
             [InlineKeyboardButton("Squadra B", callback_data="campo_squadra_b")],
@@ -284,34 +303,33 @@ async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         await update.message.reply_text("✅ Modifica effettuata.")
     elif campo == 'gol' or campo == 'assist':
-        # Dobbiamo cancellare e reinserire le prestazioni per questa partita
         c.execute('SELECT squadra_a, squadra_b, risultato FROM partite WHERE id = ?', (partita_id,))
         row = c.fetchone()
         squadra_a = row[0].split(',')
         squadra_b = row[1].split(',')
         risultato = row[2]
-        # Prendi anche l'altro campo (se serve), se assist/gol non modificato, riprendi l'esistente
         c.execute('SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id WHERE partita_id = ?', (partita_id,))
         prestazioni = c.fetchall()
         if campo == 'gol':
             nuovo_gol = parse_stats(nuovo_valore)
             assist_esist = {nome: a for nome, g, a, sq in prestazioni}
+            gol_esist = {nome: g for nome, g, a, sq in prestazioni}
         else:
             nuovo_assist = parse_stats(nuovo_valore)
             gol_esist = {nome: g for nome, g, a, sq in prestazioni}
-        # cancella le prestazioni esistenti
+            assist_esist = {nome: a for nome, g, a, sq in prestazioni}
         c.execute('DELETE FROM prestazioni WHERE partita_id = ?', (partita_id,))
         gol_a, gol_b = map(int, risultato.split('-'))
         for nome in squadra_a:
             giocatore_id = c.execute('SELECT id FROM giocatori WHERE nome=?', (nome,)).fetchone()[0]
-            g = nuovo_gol.get(nome, gol_esist[nome]) if campo == 'gol' else gol_esist.get(nome,0)
-            a = nuovo_assist.get(nome, assist_esist[nome]) if campo == 'assist' else assist_esist.get(nome,0)
+            g = nuovo_gol.get(nome, gol_esist.get(nome,0)) if campo == 'gol' else gol_esist.get(nome,0)
+            a = nuovo_assist.get(nome, assist_esist.get(nome,0)) if campo == 'assist' else assist_esist.get(nome,0)
             c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                       (partita_id, giocatore_id, 'A', g, a, int(gol_a>gol_b), int(gol_a==gol_b), int(gol_a<gol_b)))
         for nome in squadra_b:
             giocatore_id = c.execute('SELECT id FROM giocatori WHERE nome=?', (nome,)).fetchone()[0]
-            g = nuovo_gol.get(nome, gol_esist[nome]) if campo == 'gol' else gol_esist.get(nome,0)
-            a = nuovo_assist.get(nome, assist_esist[nome]) if campo == 'assist' else assist_esist.get(nome,0)
+            g = nuovo_gol.get(nome, gol_esist.get(nome,0)) if campo == 'gol' else gol_esist.get(nome,0)
+            a = nuovo_assist.get(nome, assist_esist.get(nome,0)) if campo == 'assist' else assist_esist.get(nome,0)
             c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                       (partita_id, giocatore_id, 'B', g, a, int(gol_b>gol_a), int(gol_a==gol_b), int(gol_b<gol_a)))
         conn.commit()
