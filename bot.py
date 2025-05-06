@@ -549,11 +549,26 @@ def main():
     conv_nuova = ConversationHandler(
         entry_points=[CommandHandler('nuovapartita', nuova_partita)],
         states={
-            SQUADRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, squadre)],
-            DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, data_partita)],
-            RISULTATO: [MessageHandler(filters.TEXT & ~filters.COMMAND, risultato)],
-            GOL: [MessageHandler(filters.TEXT & ~filters.COMMAND, gol)],
-            ASSIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, assist)],
+            SQUADRE: [
+                MessageHandler(filters.TEXT, squadre),
+                CommandHandler('annulla', annulla)
+            ],
+            DATA: [
+                MessageHandler(filters.TEXT, data_partita),
+                CommandHandler('annulla', annulla)
+            ],
+            RISULTATO: [
+                MessageHandler(filters.TEXT, risultato),
+                CommandHandler('annulla', annulla)
+            ],
+            GOL: [
+                MessageHandler(filters.TEXT, gol),
+                CommandHandler('annulla', annulla)
+            ],
+            ASSIST: [
+                MessageHandler(filters.TEXT, assist),
+                CommandHandler('annulla', annulla)
+            ],
         },
         fallbacks=[CommandHandler('annulla', annulla)],
         allow_reentry=True
@@ -562,7 +577,10 @@ def main():
     conv_aggiungi = ConversationHandler(
         entry_points=[CommandHandler('aggiungi_giocatore', aggiungi_giocatore)],
         states={
-            AGGIUNGI_GIOCATORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, aggiungi_giocatore_salva)],
+            AGGIUNGI_GIOCATORE: [
+                MessageHandler(filters.TEXT, aggiungi_giocatore_salva),
+                CommandHandler('annulla', annulla)
+            ],
         },
         fallbacks=[CommandHandler('annulla', annulla)],
         allow_reentry=True
@@ -571,7 +589,10 @@ def main():
     conv_partita = ConversationHandler(
         entry_points=[CommandHandler('partita', partita)],
         states={
-            20: [MessageHandler(filters.TEXT & ~filters.COMMAND, mostra_partita)],
+            20: [
+                MessageHandler(filters.TEXT, mostra_partita),
+                CommandHandler('annulla', annulla)
+            ],
         },
         fallbacks=[CommandHandler('annulla', annulla)],
         allow_reentry=True
@@ -580,7 +601,10 @@ def main():
     conv_elimina = ConversationHandler(
         entry_points=[CommandHandler('elimina_partita', elimina_partita)],
         states={
-            ELIMINA_PARTITA_SELEZIONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, elimina_partita_data)],
+            ELIMINA_PARTITA_SELEZIONE: [
+                MessageHandler(filters.TEXT, elimina_partita_data),
+                CommandHandler('annulla', annulla)
+            ],
         },
         fallbacks=[CommandHandler('annulla', annulla)],
         allow_reentry=True
@@ -589,9 +613,15 @@ def main():
     conv_modifica = ConversationHandler(
         entry_points=[CommandHandler('modifica_partita', modifica_partita)],
         states={
-            MODIFICA_PARTITA_SELEZIONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, modifica_partita_data)],
+            MODIFICA_PARTITA_SELEZIONE: [
+                MessageHandler(filters.TEXT, modifica_partita_data),
+                CommandHandler('annulla', annulla)
+            ],
             MODIFICA_CAMPO: [CallbackQueryHandler(modifica_campo_callback)],
-            MODIFICA_VALORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, modifica_valore)],
+            MODIFICA_VALORE: [
+                MessageHandler(filters.TEXT, modifica_valore),
+                CommandHandler('annulla', annulla)
+            ],
         },
         fallbacks=[CommandHandler('annulla', annulla)],
         allow_reentry=True
