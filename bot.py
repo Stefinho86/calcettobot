@@ -3,19 +3,20 @@ import sqlite3
 from datetime import datetime
 from collections import Counter, defaultdict
 from telegram import (
-    Update, 
-    InputFile, 
-    ReplyKeyboardMarkup, 
-    InlineKeyboardButton, 
-    InlineKeyboardMarkup
+    Update,
+    InputFile,
+    ReplyKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton
 )
 from telegram.ext import (
-    Application, 
-    CommandHandler, 
-    MessageHandler, 
+    Application,
+    CommandHandler,
+    MessageHandler,
     CallbackQueryHandler,
-    filters, 
-    ConversationHandler, 
+    filters,
+    ConversationHandler,
     ContextTypes
 )
 from reportlab.lib.pagesizes import letter, landscape
@@ -26,11 +27,13 @@ from reportlab.lib import colors
 SQUADRE, DATA, RISULTATO, GOL, ASSIST = range(5)
 MODIFICA_PARTITA_SELEZIONE, MODIFICA_CAMPO, MODIFICA_VALORE = range(5,8)
 ELIMINA_PARTITA_SELEZIONE = 8
+AGGIUNGI_GIOCATORE = 9
+
+DB_FILE = 'calcetto.db'
 
 # ------ DATABASE ------
 def init_db():
-    # Solo crea le tabelle se non esistono, MAI DROP o DELETE!
-    conn = sqlite3.connect('calcetto.db')
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS giocatori (id INTEGER PRIMARY KEY, nome TEXT UNIQUE)''')
     c.execute('''CREATE TABLE IF NOT EXISTS partite (id INTEGER PRIMARY KEY, data TEXT, squadra_a TEXT, squadra_b TEXT, risultato TEXT)''')
@@ -38,11 +41,25 @@ def init_db():
     conn.commit()
     conn.close()
 
-def salva_partita(data):
-    conn = sqlite3.connect('calcetto.db')
+def lista_giocatori():
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    for nome in data['squadra_a'] + data['squadra_b']:
+    c.execute('SELECT nome FROM giocatori ORDER BY nome')
+    nomi = [row[0] for row in c.fetchall()]
+    conn.close()
+    return nomi
+
+def aggiungi_giocatori_db(nomi):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    for nome in nomi:
         c.execute('INSERT OR IGNORE INTO giocatori (nome) VALUES (?)', (nome,))
+    conn.commit()
+    conn.close()
+
+def salva_partita(data):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
     c.execute('INSERT INTO partite (data, squadra_a, squadra_b, risultato) VALUES (?, ?, ?, ?)',
               (data['data'], ','.join(data['squadra_a']), ','.join(data['squadra_b']), data['risultato']))
     partita_id = c.lastrowid
@@ -76,37 +93,90 @@ def valida_data(data_str):
         return None
 
 # ------ BOT HANDLERS ------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "Benvenuto nel bot delle statistiche di calcetto! ⚽️\n"
-        "Comandi disponibili:\n"
-        "/nuovapartita - Inserisci una nuova partita\n"
-        "/statistiche - Statistiche avanzate\n"
-        "/partita - Estrai una partita per data\n"
-        "/partite - Vedi tutte le partite\n"
-        "/elimina_partita - Elimina una partita\n"
-        "/modifica_partita - Modifica una partita\n"
-        "❗️ Il formato data è GG/MM/AAAA"
-    )
-    await update.message.reply_text(text)
 
-# ---- Inserimento nuova partita con tastiera ----
-async def nuova_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
+        [KeyboardButton("/partite"), KeyboardButton("/giocatori")],
+        [KeyboardButton("/aggiungi_giocatore")],
+        [KeyboardButton("/modifica_partita"), KeyboardButton("/elimina_partita")],
+    ]
     await update.message.reply_text(
-        "Inserisci i nomi dei 5 giocatori della Squadra A, separati da virgola:",
+        "Menù principale. Scegli un comando:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await menu(update, context)
+
+async def giocatori(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nomi = lista_giocatori()
+    if not nomi:
+        await update.message.reply_text("Nessun giocatore registrato. Usa /aggiungi_giocatore per aggiungerli.")
+    else:
+        await update.message.reply_text("🏃 Elenco giocatori:\n" + "\n".join(sorted(nomi)))
+
+async def aggiungi_giocatore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Inserisci uno o più nomi di giocatori separati da virgola (es: Rossi, Bianchi, Verdi):",
+        reply_markup=ReplyKeyboardMarkup([["/annulla"]], resize_keyboard=True, one_time_keyboard=True)
+    )
+    return AGGIUNGI_GIOCATORE
+
+async def aggiungi_giocatore_salva(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    testo = update.message.text
+    nomi = [n.strip() for n in testo.split(',') if n.strip()]
+    if not nomi:
+        await update.message.reply_text("Nessun nome valido inserito. Riprova o /annulla.")
+        return AGGIUNGI_GIOCATORE
+    aggiungi_giocatori_db(nomi)
+    await update.message.reply_text("✅ Giocatore/i aggiunto/i: " + ", ".join(nomi))
+    return ConversationHandler.END
+
+# ---- Inserimento nuova partita con verifica giocatori ----
+async def nuova_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nomi = lista_giocatori()
+    if not nomi:
+        await update.message.reply_text("⚠️ Nessun giocatore registrato. Usa prima /aggiungi_giocatore.")
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "Inserisci i nomi dei 5 giocatori della Squadra A, separati da virgola (scegli tra questi giocatori registrati):\n\n"
+        + ", ".join(nomi),
         reply_markup=ReplyKeyboardMarkup([["/annulla"]], resize_keyboard=True, one_time_keyboard=True)
     )
     context.user_data['step'] = 0
+    context.user_data['giocatori_registrati'] = set(nomi)
     return SQUADRE
 
 async def squadre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    giocatori_registrati = context.user_data.get('giocatori_registrati', set())
     if context.user_data['step'] == 0:
-        context.user_data['squadra_a'] = [n.strip() for n in update.message.text.split(',')]
+        squadra_a = [n.strip() for n in update.message.text.split(',')]
+        non_registrati = [n for n in squadra_a if n not in giocatori_registrati]
+        if len(squadra_a) != 5 or non_registrati:
+            await update.message.reply_text(
+                f"❌ Errore. La tua Squadra A contiene giocatori non registrati: {', '.join(non_registrati)}\n"
+                f"Inserisci esattamente 5 giocatori tra quelli registrati:\n" + ", ".join(sorted(giocatori_registrati))
+            )
+            return SQUADRE
+        context.user_data['squadra_a'] = squadra_a
         await update.message.reply_text("Inserisci i nomi dei 5 giocatori della Squadra B, separati da virgola:")
         context.user_data['step'] = 1
         return SQUADRE
     else:
-        context.user_data['squadra_b'] = [n.strip() for n in update.message.text.split(',')]
+        squadra_b = [n.strip() for n in update.message.text.split(',')]
+        non_registrati = [n for n in squadra_b if n not in giocatori_registrati]
+        if len(squadra_b) != 5 or non_registrati:
+            await update.message.reply_text(
+                f"❌ Errore. La tua Squadra B contiene giocatori non registrati: {', '.join(non_registrati)}\n"
+                f"Inserisci esattamente 5 giocatori tra quelli registrati:\n" + ", ".join(sorted(giocatori_registrati))
+            )
+            return SQUADRE
+        # Controllo che non ci siano nomi in comune nelle due squadre
+        if set(context.user_data['squadra_a']) & set(squadra_b):
+            await update.message.reply_text("❌ Errore. Un giocatore non può essere in entrambe le squadre!")
+            return SQUADRE
+        context.user_data['squadra_b'] = squadra_b
         await update.message.reply_text("Inserisci la data della partita (GG/MM/AAAA):")
         return DATA
 
@@ -131,11 +201,25 @@ async def gol(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASSIST
 
 async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['assist'] = update.message.text
+    # Verifica che i marcatori e gli assist siano solo giocatori nelle due squadre
+    squadra = set(context.user_data['squadra_a'] + context.user_data['squadra_b'])
+    marcatori = set(parse_stats(context.user_data['gol']).keys())
+    assistman = set(parse_stats(context.user_data['assist']).keys())
+    non_in_sq_marc = [n for n in marcatori if n not in squadra]
+    non_in_sq_assist = [n for n in assistman if n not in squadra]
+    if non_in_sq_marc or non_in_sq_assist:
+        msg = ""
+        if non_in_sq_marc:
+            msg += f"❌ I seguenti marcatori non sono nelle formazioni: {', '.join(non_in_sq_marc)}\n"
+        if non_in_sq_assist:
+            msg += f"❌ I seguenti assistman non sono nelle formazioni: {', '.join(non_in_sq_assist)}\n"
+        msg += "Correggi e reinserisci marcatori e assist."
+        await update.message.reply_text(msg)
+        return ASSIST
     salva_partita(context.user_data)
     await update.message.reply_text(
-        "✅ Partita salvata!\nScrivi /statistiche per ricevere le statistiche o /start per tornare al menù.",
-        reply_markup=ReplyKeyboardMarkup([["/statistiche", "/start"]], resize_keyboard=True, one_time_keyboard=True)
+        "✅ Partita salvata!\nScrivi /statistiche per ricevere le statistiche o /menu per tornare al menù.",
+        reply_markup=ReplyKeyboardMarkup([["/menu", "/statistiche"]], resize_keyboard=True, one_time_keyboard=True)
     )
     return ConversationHandler.END
 
@@ -146,23 +230,19 @@ async def annulla(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---- Statistiche avanzate (PDF + TXT) ----
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        conn = sqlite3.connect('calcetto.db')
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        # Ottieni tutti i nomi
         c.execute('SELECT id, nome FROM giocatori')
         giocatori = c.fetchall()
-        # Prepara struttura avanzata
         statistiche = []
         compagni_dict = {}
         avversari_dict = {}
 
-        # Carica tutte le partite e prestazioni
         c.execute('SELECT * FROM partite ORDER BY data')
         partite = c.fetchall()
         c.execute('SELECT * FROM prestazioni')
         prestazioni = c.fetchall()
 
-        # Ricostruisci mappature utili
         partite_map = {p[0]: p for p in partite}
         giocatore_nome = {gid: nome for gid, nome in giocatori}
         nome_id = {nome: gid for gid, nome in giocatori}
@@ -170,7 +250,6 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for pr in prestazioni:
             giocatore_partite[pr[2]].append(pr)
 
-        # Calcolo compagni e avversari
         for gid, nome in giocatori:
             compagni = Counter()
             avversari = Counter()
@@ -189,7 +268,6 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
             compagni_dict[nome] = compagni.most_common(3)
             avversari_dict[nome] = avversari.most_common(3)
 
-        # Calcola statistiche generali
         for gid, nome in giocatori:
             prs = giocatore_partite[gid]
             presenze = len(prs)
@@ -210,13 +288,12 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 vittorie, perc_vittorie, pareggi, perc_pareggi, sconfitte, perc_sconfitte, compagni_top, avversari_top
             ])
         header = [
-            "Nome", "Pres.", "Gol", "Media Gol", "Assist", "Media Assist", 
-            "Vittorie", "%Vitt", "Pareggi", "%Par", "Sconfitte", "%Sco", 
+            "Nome", "Pres.", "Gol", "Media Gol", "Assist", "Media Assist",
+            "Vittorie", "%Vitt", "Pareggi", "%Par", "Sconfitte", "%Sco",
             "Top Compagni", "Top Avversari"
         ]
         filename = "statistiche_avanzate.pdf"
         genera_pdf_avanzato([header]+statistiche, filename)
-        # Genera TXT partite singole
         partite_lines = []
         for p in partite:
             partite_lines.append(
@@ -261,6 +338,32 @@ def genera_pdf_avanzato(data, filename):
     elements.append(table)
     doc.build(elements)
 
+# ---- Lista TUTTE le partite ----
+async def tutte_le_partite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT data, squadra_a, squadra_b, risultato FROM partite ORDER BY data')
+    partite = c.fetchall()
+    conn.close()
+    if not partite:
+        await update.message.reply_text("Nessuna partita registrata.")
+        return
+    lines = []
+    for p in partite:
+        lines.append(
+            f"{p[0]} | Risultato: {p[3]} | Squadra A: {p[1]} | Squadra B: {p[2]}"
+        )
+    testo = "\n".join(lines)
+    if len(testo) > 4000:
+        with open("tutte_le_partite.txt", "w", encoding="utf-8") as f:
+            f.write(testo)
+        await update.message.reply_document(
+            document=InputFile(open("tutte_le_partite.txt", "rb"), filename="tutte_le_partite.txt"),
+            caption="Elenco completo partite"
+        )
+    else:
+        await update.message.reply_text("Ecco la lista di tutte le partite giocate:\n\n" + testo)
+
 # ---- Estrai singola partita ----
 async def partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Inserisci la data della partita che vuoi visualizzare (GG/MM/AAAA):")
@@ -272,7 +375,7 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not data_valida:
         await update.message.reply_text("❌ Formato data non valido. Scrivi la data in formato GG/MM/AAAA (es: 04/04/2024):")
         return 20
-    conn = sqlite3.connect('calcetto.db')
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_valida,))
     row = c.fetchone()
@@ -294,33 +397,6 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(testo)
     return ConversationHandler.END
 
-# ---- Lista TUTTE le partite ----
-async def tutte_le_partite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect('calcetto.db')
-    c = conn.cursor()
-    c.execute('SELECT data, squadra_a, squadra_b, risultato FROM partite ORDER BY data')
-    partite = c.fetchall()
-    conn.close()
-    if not partite:
-        await update.message.reply_text("Nessuna partita registrata.")
-        return
-    lines = []
-    for p in partite:
-        lines.append(
-            f"{p[0]} | Risultato: {p[3]} | Squadra A: {p[1]} | Squadra B: {p[2]}"
-        )
-    testo = "\n".join(lines)
-    # Telegram limita i messaggi a 4096 caratteri. Se si supera, invia come file
-    if len(testo) > 4000:
-        with open("tutte_le_partite.txt", "w", encoding="utf-8") as f:
-            f.write(testo)
-        await update.message.reply_document(
-            document=InputFile(open("tutte_le_partite.txt", "rb"), filename="tutte_le_partite.txt"),
-            caption="Elenco completo partite"
-        )
-    else:
-        await update.message.reply_text("Ecco la lista di tutte le partite giocate:\n\n" + testo)
-
 # ---- Elimina partita ----
 async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Inserisci la data della partita da eliminare (GG/MM/AAAA):")
@@ -332,7 +408,7 @@ async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYP
     if not data_valida:
         await update.message.reply_text("❌ Formato data non valido. Scrivi la data in formato GG/MM/AAAA (es: 04/04/2024):")
         return ELIMINA_PARTITA_SELEZIONE
-    conn = sqlite3.connect('calcetto.db')
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_valida,))
     partite = c.fetchall()
@@ -356,7 +432,7 @@ async def elimina_partita_callback(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     if query.data.startswith("del_"):
         partita_id = int(query.data.split("_")[1])
-        conn = sqlite3.connect('calcetto.db')
+        conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute('DELETE FROM prestazioni WHERE partita_id = ?', (partita_id,))
         c.execute('DELETE FROM partite WHERE id = ?', (partita_id,))
@@ -375,7 +451,7 @@ async def modifica_partita_data(update: Update, context: ContextTypes.DEFAULT_TY
     if not data_valida:
         await update.message.reply_text("❌ Formato data non valido. Scrivi la data in formato GG/MM/AAAA (es: 04/04/2024):")
         return MODIFICA_PARTITA_SELEZIONE
-    conn = sqlite3.connect('calcetto.db')
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = ?', (data_valida,))
     partite = c.fetchall()
@@ -424,7 +500,7 @@ async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
     campo = context.user_data['campo_modifica']
     partita_id = context.user_data['modifica_id']
     nuovo_valore = update.message.text.strip()
-    conn = sqlite3.connect('calcetto.db')
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     if campo in ['squadra_a', 'squadra_b', 'risultato']:
         c.execute(f'UPDATE partite SET {campo} = ? WHERE id = ?', (nuovo_valore, partita_id))
@@ -484,6 +560,15 @@ def main():
         allow_reentry=True
     )
 
+    conv_aggiungi = ConversationHandler(
+        entry_points=[CommandHandler('aggiungi_giocatore', aggiungi_giocatore)],
+        states={
+            AGGIUNGI_GIOCATORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, aggiungi_giocatore_salva)],
+        },
+        fallbacks=[CommandHandler('annulla', annulla)],
+        allow_reentry=True
+    )
+
     conv_partita = ConversationHandler(
         entry_points=[CommandHandler('partita', partita)],
         states={
@@ -514,7 +599,10 @@ def main():
     )
 
     app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('menu', menu))
     app.add_handler(conv_nuova)
+    app.add_handler(conv_aggiungi)
+    app.add_handler(CommandHandler('giocatori', giocatori))
     app.add_handler(CommandHandler('statistiche', statistiche))
     app.add_handler(conv_partita)
     app.add_handler(CommandHandler('partite', tutte_le_partite))
