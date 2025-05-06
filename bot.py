@@ -31,7 +31,6 @@ AGGIUNGI_GIOCATORE = 9
 
 DB_FILE = 'calcetto.db'
 
-# ------ DATABASE ------
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -92,8 +91,6 @@ def valida_data(data_str):
     except Exception:
         return None
 
-# ------ BOT HANDLERS ------
-
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
@@ -137,7 +134,6 @@ async def annulla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Operazione annullata.", reply_markup=None)
     return ConversationHandler.END
 
-# ---- Inserimento nuova partita con verifica giocatori ----
 async def nuova_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     nomi = lista_giocatori()
     if not nomi:
@@ -214,7 +210,7 @@ async def gol(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text and update.message.text.strip().lower() == '/annulla':
         return await annulla(update, context)
-    context.user_data['assist'] = update.message.text  # <-- QUESTA ERA LA PARTE MANCANTE!
+    context.user_data['assist'] = update.message.text  # Questa linea è fondamentale!
     squadra = set(context.user_data['squadra_a'] + context.user_data['squadra_b'])
     marcatori = set(parse_stats(context.user_data['gol']).keys())
     assistman = set(parse_stats(context.user_data['assist']).keys())
@@ -236,7 +232,6 @@ async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# ---- Statistiche avanzate (PDF + TXT) ----
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -303,15 +298,35 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         filename = "statistiche_avanzate.pdf"
         genera_pdf_avanzato([header]+statistiche, filename)
-        partite_lines = []
-        for p in partite:
-            partite_lines.append(
-                f"{p[1]} | Risultato: {p[4]} | Squadra A: {p[2]} | Squadra B: {p[3]}"
-            )
-        partite_txt = "\n".join(partite_lines)
-        txt_filename = "partite.txt"
-        with open(txt_filename, "w", encoding="utf-8") as f:
-            f.write(partite_txt)
+
+        # --- PDF partite con marcatori e assist ---
+        c.execute("SELECT id, data, squadra_a, squadra_b, risultato FROM partite ORDER BY data")
+        partite_rows = c.fetchall()
+        partite_data = []
+        for row in partite_rows:
+            partita_id, data, squadra_a, squadra_b, risultato = row
+            # Ottieni marcatori e assistman
+            c.execute("""
+                SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra
+                FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id
+                WHERE partita_id = ? AND (gol > 0 OR assist > 0)
+                ORDER BY prestazioni.squadra, giocatori.nome
+            """, (partita_id,))
+            dettaglio = c.fetchall()
+            marcatori = [f"{nome} ({gol})" for nome, gol, assist, sq in dettaglio if gol > 0]
+            assistman = [f"{nome} ({assist})" for nome, gol, assist, sq in dettaglio if assist > 0]
+            partite_data.append([
+                data,
+                squadra_a,
+                squadra_b,
+                risultato,
+                ", ".join(marcatori) if marcatori else "-",
+                ", ".join(assistman) if assistman else "-"
+            ])
+        partite_header = ["Data", "Squadra A", "Squadra B", "Risultato", "Marcatori", "Assistman"]
+        partite_pdf_filename = "partite.pdf"
+        genera_pdf_partite([partite_header]+partite_data, partite_pdf_filename)
+
         if len(statistiche) == 0:
             await update.message.reply_text("Nessuna statistica disponibile. Inserisci almeno una partita!")
             return
@@ -320,8 +335,8 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption="📊 Statistiche avanzate calcetto"
         )
         await update.message.reply_document(
-            document=InputFile(open(txt_filename, "rb"), filename=txt_filename),
-            caption="📅 Lista partite"
+            document=InputFile(open(partite_pdf_filename, "rb"), filename=partite_pdf_filename),
+            caption="📅 Lista partite con marcatori e assist"
         )
     except Exception as e:
         print("[ERRORE]", e)
@@ -347,7 +362,26 @@ def genera_pdf_avanzato(data, filename):
     elements.append(table)
     doc.build(elements)
 
-# ---- Lista TUTTE le partite ----
+def genera_pdf_partite(data, filename):
+    doc = SimpleDocTemplate(filename, pagesize=landscape(letter))
+    style = TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
+        ('TEXTCOLOR',(0,0),(-1,0),colors.black),
+        ('ALIGN',(0,0),(-1,-1),'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('FONTSIZE', (0,1), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
+    ])
+    table = Table(data, repeatRows=1, colWidths=[60,90,90,60,120,120])
+    table.setStyle(style)
+    elements = []
+    elements.append(Paragraph("Elenco partite (con marcatori e assist)", getSampleStyleSheet()['Title']))
+    elements.append(Spacer(1,8))
+    elements.append(table)
+    doc.build(elements)
+
 async def tutte_le_partite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -373,7 +407,6 @@ async def tutte_le_partite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Ecco la lista di tutte le partite giocate:\n\n" + testo)
 
-# ---- Estrai singola partita ----
 async def partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Inserisci la data della partita che vuoi visualizzare (GG/MM/AAAA):")
     return 20
@@ -406,7 +439,6 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(testo)
     return ConversationHandler.END
 
-# ---- Elimina partita ----
 async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Inserisci la data della partita da eliminare (GG/MM/AAAA):")
     return ELIMINA_PARTITA_SELEZIONE
@@ -449,7 +481,6 @@ async def elimina_partita_callback(update: Update, context: ContextTypes.DEFAULT
         conn.close()
         await query.edit_message_text("✅ Partita eliminata.")
 
-# ---- Modifica partita ----
 async def modifica_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Inserisci la data della partita da modificare (GG/MM/AAAA):")
     return MODIFICA_PARTITA_SELEZIONE
@@ -550,7 +581,6 @@ async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     return ConversationHandler.END
 
-# ---- MAIN ----
 def main():
     init_db()
     token = os.environ.get('TOKEN') or "INSERISCI_IL_TUO_TOKEN"
