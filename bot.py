@@ -21,7 +21,8 @@ from telegram.ext import (
 )
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT
 from reportlab.lib import colors
 
 SQUADRE, DATA, RISULTATO, GOL, ASSIST = range(5)
@@ -318,6 +319,14 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute("SELECT id, data, squadra_a, squadra_b, risultato FROM partite ORDER BY data")
         partite_rows = c.fetchall()
         partite_data = []
+        styles = getSampleStyleSheet()
+        para_style = ParagraphStyle(
+            'MyStyle',
+            fontName='Helvetica',
+            fontSize=8,
+            leading=10,
+            alignment=TA_LEFT
+        )
         for row in partite_rows:
             partita_id, data, squadra_a, squadra_b, risultato = row
             c.execute("""
@@ -329,15 +338,23 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dettaglio = c.fetchall()
             marcatori = [f"{nome} ({gol})" for nome, gol, assist, sq in dettaglio if gol > 0]
             assistman = [f"{nome} ({assist})" for nome, gol, assist, sq in dettaglio if assist > 0]
+
             partite_data.append([
-                data,
-                squadra_a,
-                squadra_b,
-                risultato,
-                ", ".join(marcatori) if marcatori else "-",
-                ", ".join(assistman) if assistman else "-"
+                Paragraph(str(data), para_style),
+                Paragraph(squadra_a.replace(",", ", "), para_style),
+                Paragraph(squadra_b.replace(",", ", "), para_style),
+                Paragraph(str(risultato), para_style),
+                Paragraph("<br/>".join(marcatori) if marcatori else "-", para_style),
+                Paragraph("<br/>".join(assistman) if assistman else "-", para_style)
             ])
-        partite_header = ["Data", "Squadra A", "Squadra B", "Risultato", "Marcatori", "Assistman"]
+        partite_header = [
+            Paragraph("Data", para_style),
+            Paragraph("Squadra A", para_style),
+            Paragraph("Squadra B", para_style),
+            Paragraph("Risultato", para_style),
+            Paragraph("Marcatori", para_style),
+            Paragraph("Assistman", para_style)
+        ]
         partite_pdf_filename = "partite.pdf"
         genera_pdf_partite([partite_header]+partite_data, partite_pdf_filename)
 
@@ -377,7 +394,7 @@ def genera_pdf_avanzato(data, filename):
     doc.build(elements)
 
 def genera_pdf_partite(data, filename):
-    doc = SimpleDocTemplate(filename, pagesize=landscape(letter))
+    doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=20, leftMargin=20)
     style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
         ('TEXTCOLOR',(0,0),(-1,0),colors.black),
@@ -388,10 +405,11 @@ def genera_pdf_partite(data, filename):
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
     ])
+    # Nessuna colWidths: adattamento automatico, ma possiamo forzare un minimo sulle prime colonne
     table = Table(
         data,
         repeatRows=1,
-        colWidths=[60, 180, 180, 60, 110, 110],
+        colWidths=[55, 100, 100, 55, None, None],  # None lascia adattare la larghezza, le ultime colonne occupano tutto lo spazio
         splitByRow=1
     )
     table.setStyle(style)
