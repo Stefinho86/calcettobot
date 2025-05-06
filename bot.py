@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from datetime import datetime
+from collections import Counter, defaultdict
 from telegram import (
     Update, 
     InputFile, 
@@ -17,8 +18,10 @@ from telegram.ext import (
     ConversationHandler, 
     ContextTypes
 )
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 
 SQUADRE, DATA, RISULTATO, GOL, ASSIST = range(5)
 MODIFICA_PARTITA_SELEZIONE, MODIFICA_CAMPO, MODIFICA_VALORE = range(5,8)
@@ -66,7 +69,6 @@ def parse_stats(s):
 
 def valida_data(data_str):
     try:
-        # Prova a convertire GG/MM/AAAA in datetime
         dt = datetime.strptime(data_str, "%d/%m/%Y")
         return dt.strftime("%d/%m/%Y")
     except Exception:
@@ -78,12 +80,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Benvenuto nel bot delle statistiche di calcetto! ⚽️\n"
         "Comandi disponibili:\n"
         "/nuovapartita - Inserisci una nuova partita\n"
-        "/statistiche - Scarica le statistiche complete\n"
+        "/statistiche - Statistiche avanzate\n"
         "/partita - Estrai una partita per data\n"
         "/elimina_partita - Elimina una partita\n"
         "/modifica_partita - Modifica una partita\n"
-        "Puoi usare questi comandi anche nei gruppi!\n"
-        "❗️ Il formato data ora è GG/MM/AAAA"
+        "❗️ Il formato data è GG/MM/AAAA"
     )
     await update.message.reply_text(text)
 
@@ -131,7 +132,7 @@ async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['assist'] = update.message.text
     salva_partita(context.user_data)
     await update.message.reply_text(
-        "✅ Partita salvata!\nScrivi /statistiche per ricevere il PDF delle statistiche o /start per tornare al menù.",
+        "✅ Partita salvata!\nScrivi /statistiche per ricevere le statistiche o /start per tornare al menù.",
         reply_markup=ReplyKeyboardMarkup([["/statistiche", "/start"]], resize_keyboard=True, one_time_keyboard=True)
     )
     return ConversationHandler.END
@@ -140,50 +141,128 @@ async def annulla(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Operazione annullata.", reply_markup=None)
     return ConversationHandler.END
 
-# ---- Statistiche (PDF) ----
+# ---- Statistiche avanzate (PDF + TXT) ----
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         conn = sqlite3.connect('calcetto.db')
         c = conn.cursor()
-        c.execute('''
-            SELECT nome, 
-                   COUNT(prestazioni.id) as presenze, 
-                   IFNULL(SUM(gol),0), 
-                   IFNULL(SUM(assist),0), 
-                   IFNULL(SUM(vittoria),0), 
-                   IFNULL(SUM(pareggio),0), 
-                   IFNULL(SUM(sconfitta),0)
-            FROM giocatori 
-            LEFT JOIN prestazioni ON giocatori.id = prestazioni.giocatore_id 
-            GROUP BY nome
-        ''')
-        rows = c.fetchall()
-        conn.close()
-        print("[DEBUG] Statistiche rows:", rows)
-        data = [['Nome', 'Presenze', 'Gol', 'Assist', 'Vittorie', 'Pareggi', 'Sconfitte']]
-        for row in rows:
-            data.append([str(x) if x is not None else '0' for x in row])
+        # Ottieni tutti i nomi
+        c.execute('SELECT id, nome FROM giocatori')
+        giocatori = c.fetchall()
+        # Prepara struttura avanzata
+        statistiche = []
+        compagni_dict = {}
+        avversari_dict = {}
 
-        if len(data) == 1:
+        # Carica tutte le partite e prestazioni
+        c.execute('SELECT * FROM partite ORDER BY data')
+        partite = c.fetchall()
+        c.execute('SELECT * FROM prestazioni')
+        prestazioni = c.fetchall()
+
+        # Ricostruisci mappature utili
+        partite_map = {p[0]: p for p in partite}
+        giocatore_nome = {gid: nome for gid, nome in giocatori}
+        nome_id = {nome: gid for gid, nome in giocatori}
+        giocatore_partite = defaultdict(list)
+        for pr in prestazioni:
+            # pr: id, partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta
+            giocatore_partite[pr[2]].append(pr)
+
+        # Calcolo compagni e avversari
+        for gid, nome in giocatori:
+            compagni = Counter()
+            avversari = Counter()
+            partite_giocatore = giocatore_partite[gid]
+            for pr in partite_giocatore:
+                partita_id = pr[1]
+                squadra_gioc = pr[3]
+                # Trova tutti i presenti nella stessa partita
+                prs = [p for p in prestazioni if p[1] == partita_id]
+                for p in prs:
+                    if p[2] == gid:
+                        continue
+                    if p[3] == squadra_gioc:
+                        compagni[giocatore_nome[p[2]]] += 1
+                    else:
+                        avversari[giocatore_nome[p[2]]] += 1
+            compagni_dict[nome] = compagni.most_common(3)
+            avversari_dict[nome] = avversari.most_common(3)
+
+        # Calcola statistiche generali
+        for gid, nome in giocatori:
+            prs = giocatore_partite[gid]
+            presenze = len(prs)
+            gol_tot = sum(p[4] for p in prs)
+            assist_tot = sum(p[5] for p in prs)
+            vittorie = sum(p[6] for p in prs)
+            pareggi = sum(p[7] for p in prs)
+            sconfitte = sum(p[8] for p in prs)
+            media_gol = round(gol_tot/presenze,2) if presenze else 0
+            media_assist = round(assist_tot/presenze,2) if presenze else 0
+            perc_vittorie = f"{round(100*vittorie/presenze,1)}%" if presenze else "0%"
+            perc_pareggi = f"{round(100*pareggi/presenze,1)}%" if presenze else "0%"
+            perc_sconfitte = f"{round(100*sconfitte/presenze,1)}%" if presenze else "0%"
+            compagni_top = ', '.join([f"{n} ({c})" for n,c in compagni_dict[nome]]) if compagni_dict[nome] else "-"
+            avversari_top = ', '.join([f"{n} ({c})" for n,c in avversari_dict[nome]]) if avversari_dict[nome] else "-"
+            statistiche.append([
+                nome, presenze, gol_tot, media_gol, assist_tot, media_assist,
+                vittorie, perc_vittorie, pareggi, perc_pareggi, sconfitte, perc_sconfitte, compagni_top, avversari_top
+            ])
+        header = [
+            "Nome", "Pres.", "Gol", "Media Gol", "Assist", "Media Assist", 
+            "Vittorie", "%Vitt", "Pareggi", "%Par", "Sconfitte", "%Sco", 
+            "Top Compagni", "Top Avversari"
+        ]
+        # Genera PDF
+        filename = "statistiche_avanzate.pdf"
+        genera_pdf_avanzato([header]+statistiche, filename)
+        # Genera TXT partite singole
+        partite_lines = []
+        for p in partite:
+            # p: id, data, squadra_a, squadra_b, risultato
+            partite_lines.append(
+                f"{p[1]} | Risultato: {p[4]} | Squadra A: {p[2]} | Squadra B: {p[3]}"
+            )
+        partite_txt = "\n".join(partite_lines)
+        txt_filename = "partite.txt"
+        with open(txt_filename, "w", encoding="utf-8") as f:
+            f.write(partite_txt)
+        # Invio
+        if len(statistiche) == 0:
             await update.message.reply_text("Nessuna statistica disponibile. Inserisci almeno una partita!")
             return
-
-        filename = "statistiche.pdf"
-        genera_pdf(data, filename)
-        with open(filename, "rb") as f:
-            await update.message.reply_document(
-                document=InputFile(f, filename=filename),
-                caption="📊 Statistiche calcetto"
-            )
-        print("PDF inviato!")
+        await update.message.reply_document(
+            document=InputFile(open(filename, "rb"), filename=filename),
+            caption="📊 Statistiche avanzate calcetto"
+        )
+        await update.message.reply_document(
+            document=InputFile(open(txt_filename, "rb"), filename=txt_filename),
+            caption="📅 Lista partite"
+        )
     except Exception as e:
         print("[ERRORE]", e)
-        await update.message.reply_text("Si è verificato un errore nel generare il PDF: " + str(e))
+        await update.message.reply_text("Si è verificato un errore nel generare le statistiche: " + str(e))
 
-def genera_pdf(data, filename):
-    doc = SimpleDocTemplate(filename, pagesize=letter)
-    table = Table(data)
-    doc.build([table])
+def genera_pdf_avanzato(data, filename):
+    doc = SimpleDocTemplate(filename, pagesize=landscape(letter))
+    style = TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
+        ('TEXTCOLOR',(0,0),(-1,0),colors.black),
+        ('ALIGN',(0,0),(-1,-1),'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('FONTSIZE', (0,1), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
+    ])
+    table = Table(data, repeatRows=1)
+    table.setStyle(style)
+    elements = []
+    elements.append(Paragraph("Statistiche avanzate calcetto", getSampleStyleSheet()['Title']))
+    elements.append(Spacer(1,8))
+    elements.append(table)
+    doc.build(elements)
 
 # ---- Estrai singola partita ----
 async def partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
