@@ -210,7 +210,7 @@ async def gol(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text and update.message.text.strip().lower() == '/annulla':
         return await annulla(update, context)
-    context.user_data['assist'] = update.message.text  # Questa linea è fondamentale!
+    context.user_data['assist'] = update.message.text
     squadra = set(context.user_data['squadra_a'] + context.user_data['squadra_b'])
     marcatori = set(parse_stats(context.user_data['gol']).keys())
     assistman = set(parse_stats(context.user_data['assist']).keys())
@@ -374,7 +374,12 @@ def genera_pdf_partite(data, filename):
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
     ])
-    table = Table(data, repeatRows=1, colWidths=[60,90,90,60,120,120])
+    table = Table(
+        data,
+        repeatRows=1,
+        colWidths=[60, 180, 180, 60, 110, 110],  # colonne larghe per squadre
+        splitByRow=1
+    )
     table.setStyle(style)
     elements = []
     elements.append(Paragraph("Elenco partite (con marcatori e assist)", getSampleStyleSheet()['Title']))
