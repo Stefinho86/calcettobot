@@ -106,6 +106,18 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
+async def annulla(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Operazione annullata. Torni al menù principale.",
+        reply_markup=ReplyKeyboardMarkup([
+            [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
+            [KeyboardButton("/partite"), KeyboardButton("/partita")],
+            [KeyboardButton("/giocatori"), KeyboardButton("/aggiungi_giocatore")],
+            [KeyboardButton("/modifica_partita"), KeyboardButton("/elimina_partita")]
+        ], resize_keyboard=True)
+    )
+    return ConversationHandler.END
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await menu(update, context)
 
@@ -133,10 +145,7 @@ async def aggiungi_giocatore_salva(update: Update, context: ContextTypes.DEFAULT
         return AGGIUNGI_GIOCATORE
     aggiungi_giocatori_db(nomi)
     await update.message.reply_text("✅ Giocatore/i aggiunto/i: " + ", ".join(nomi))
-    return ConversationHandler.END
-
-async def annulla(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Operazione annullata.", reply_markup=None)
+    await menu(update, context)
     return ConversationHandler.END
 
 async def nuova_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -232,9 +241,10 @@ async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASSIST
     salva_partita(context.user_data)
     await update.message.reply_text(
-        "✅ Partita salvata!\nScrivi /statistiche per ricevere le statistiche o /menu per tornare al menù.",
+        "✅ Partita salvata!",
         reply_markup=ReplyKeyboardMarkup([["/menu", "/statistiche"]], resize_keyboard=True, one_time_keyboard=True)
     )
+    await menu(update, context)
     return ConversationHandler.END
 
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -310,7 +320,6 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partite_data = []
         for row in partite_rows:
             partita_id, data, squadra_a, squadra_b, risultato = row
-            # Ottieni marcatori e assistman
             c.execute("""
                 SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra
                 FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id
@@ -436,6 +445,7 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not row:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
         conn.close()
+        await menu(update, context)
         return ConversationHandler.END
     partita_id, squadra_a, squadra_b, risultato = row
     c.execute('SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id WHERE partita_id = ?', (partita_id,))
@@ -449,6 +459,7 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for r in tabella[1:]:
         testo += f"{r[0]} (Squadra {r[1]}): Gol {r[2]}, Assist {r[3]}\n"
     await update.message.reply_text(testo)
+    await menu(update, context)
     return ConversationHandler.END
 
 async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -470,6 +481,7 @@ async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYP
     if not partite:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
         conn.close()
+        await menu(update, context)
         return ConversationHandler.END
     keyboard = [
         [InlineKeyboardButton(f"{p[1]} vs {p[2]} ({p[3]})", callback_data=f"del_{p[0]}")]
@@ -494,6 +506,10 @@ async def elimina_partita_callback(update: Update, context: ContextTypes.DEFAULT
         conn.commit()
         conn.close()
         await query.edit_message_text("✅ Partita eliminata.")
+        try:
+            await menu(update, context)
+        except Exception:
+            pass
 
 async def modifica_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Inserisci la data della partita da modificare (GG/MM/AAAA):")
@@ -514,6 +530,7 @@ async def modifica_partita_data(update: Update, context: ContextTypes.DEFAULT_TY
     if not partite:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
         conn.close()
+        await menu(update, context)
         return ConversationHandler.END
     keyboard = [
         [InlineKeyboardButton(f"{p[1]} vs {p[2]} ({p[3]})", callback_data=f"mod_{p[0]}")]
@@ -597,6 +614,7 @@ async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         await update.message.reply_text("✅ Modifica effettuata.")
     conn.close()
+    await menu(update, context)
     return ConversationHandler.END
 
 def main():
