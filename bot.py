@@ -97,9 +97,9 @@ def valida_data(data_str):
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
-        [KeyboardButton("/partite"), KeyboardButton("/giocatori")],
-        [KeyboardButton("/aggiungi_giocatore")],
-        [KeyboardButton("/modifica_partita"), KeyboardButton("/elimina_partita")],
+        [KeyboardButton("/partite"), KeyboardButton("/partita")],
+        [KeyboardButton("/giocatori"), KeyboardButton("/aggiungi_giocatore")],
+        [KeyboardButton("/modifica_partita"), KeyboardButton("/elimina_partita")]
     ]
     await update.message.reply_text(
         "Menù principale. Scegli un comando:",
@@ -201,7 +201,6 @@ async def gol(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASSIST
 
 async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Verifica che i marcatori e gli assist siano solo giocatori nelle due squadre
     squadra = set(context.user_data['squadra_a'] + context.user_data['squadra_b'])
     marcatori = set(parse_stats(context.user_data['gol']).keys())
     assistman = set(parse_stats(context.user_data['assist']).keys())
