@@ -249,9 +249,9 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 compagni_dict = {}
                 avversari_dict = {}
 
-                c.execute('SELECT * FROM partite ORDER BY data')
+                c.execute('SELECT id, data, squadra_a, squadra_b, risultato FROM partite ORDER BY data')
                 partite = c.fetchall()
-                c.execute('SELECT * FROM prestazioni')
+                c.execute('SELECT partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta FROM prestazioni')
                 prestazioni = c.fetchall()
 
                 partite_map = {p[0]: p for p in partite}
@@ -259,34 +259,34 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 nome_id = {nome: gid for gid, nome in giocatori}
                 giocatore_partite = defaultdict(list)
                 for pr in prestazioni:
-                    giocatore_partite[pr[2]].append(pr)
+                    giocatore_partite[pr[1]].append(pr)  # pr[1]=giocatore_id
 
                 for gid, nome in giocatori:
                     compagni = Counter()
                     avversari = Counter()
                     partite_giocatore = giocatore_partite[gid]
                     for pr in partite_giocatore:
-                        partita_id = pr[1]
-                        squadra_gioc = pr[3]
-                        prs = [p for p in prestazioni if p[1] == partita_id]
+                        partita_id = pr[0]
+                        squadra_gioc = pr[2]
+                        prs = [p for p in prestazioni if p[0] == partita_id]
                         for p in prs:
-                            if p[2] == gid:
+                            if p[1] == gid:
                                 continue
-                            if p[3] == squadra_gioc:
-                                compagni[giocatore_nome[p[2]]] += 1
+                            if p[2] == squadra_gioc:
+                                compagni[giocatore_nome[p[1]]] += 1
                             else:
-                                avversari[giocatore_nome[p[2]]] += 1
+                                avversari[giocatore_nome[p[1]]] += 1
                     compagni_dict[nome] = compagni.most_common(3)
                     avversari_dict[nome] = avversari.most_common(3)
 
                 for gid, nome in giocatori:
                     prs = giocatore_partite[gid]
                     presenze = len(prs)
-                    gol_tot = sum(p[4] for p in prs)
-                    assist_tot = sum(p[5] for p in prs)
-                    vittorie = sum(p[6] for p in prs)
-                    pareggi = sum(p[7] for p in prs)
-                    sconfitte = sum(p[8] for p in prs)
+                    gol_tot = sum(p[3] for p in prs)
+                    assist_tot = sum(p[4] for p in prs)
+                    vittorie = sum(p[5] for p in prs)
+                    pareggi = sum(p[6] for p in prs)
+                    sconfitte = sum(p[7] for p in prs)
                     media_gol = round(gol_tot/presenze,2) if presenze else 0
                     media_assist = round(assist_tot/presenze,2) if presenze else 0
                     perc_vittorie = f"{round(100*vittorie/presenze,1)}%" if presenze else "0%"
