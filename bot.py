@@ -35,38 +35,41 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
 
-def lista_giocatori():
+def lista_giocatori(chat_id):
     with get_conn() as conn:
         with conn.cursor() as c:
-            c.execute('SELECT nome FROM giocatori ORDER BY nome')
+            c.execute('SELECT nome FROM giocatori WHERE chat_id = %s ORDER BY nome', (chat_id,))
             nomi = [row[0] for row in c.fetchall()]
     return nomi
 
-def aggiungi_giocatori_db(nomi):
+def aggiungi_giocatori_db(nomi, chat_id):
     with get_conn() as conn:
         with conn.cursor() as c:
             for nome in nomi:
-                c.execute('INSERT INTO giocatori (nome) VALUES (%s) ON CONFLICT (nome) DO NOTHING', (nome,))
+                c.execute(
+                    'INSERT INTO giocatori (nome, chat_id) VALUES (%s, %s) ON CONFLICT (nome, chat_id) DO NOTHING',
+                    (nome, chat_id)
+                )
 
-def salva_partita(data):
+def salva_partita(data, chat_id):
     with get_conn() as conn:
         with conn.cursor() as c:
-            c.execute('INSERT INTO partite (data, squadra_a, squadra_b, risultato) VALUES (%s, %s, %s, %s) RETURNING id',
-                      (data['data'], ','.join(data['squadra_a']), ','.join(data['squadra_b']), data['risultato']))
+            c.execute('INSERT INTO partite (data, squadra_a, squadra_b, risultato, chat_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
+                      (data['data'], ','.join(data['squadra_a']), ','.join(data['squadra_b']), data['risultato'], chat_id))
             partita_id = c.fetchone()[0]
             gol = parse_stats(data['gol'])
             assist = parse_stats(data['assist'])
             gol_a, gol_b = map(int, data['risultato'].split('-'))
             for nome in data['squadra_a']:
-                c.execute('SELECT id FROM giocatori WHERE nome=%s', (nome,))
+                c.execute('SELECT id FROM giocatori WHERE nome=%s AND chat_id=%s', (nome, chat_id))
                 giocatore_id = c.fetchone()[0]
-                c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-                          (partita_id, giocatore_id, 'A', gol.get(nome,0), assist.get(nome,0), int(gol_a>gol_b), int(gol_a==gol_b), int(gol_a<gol_b)))
+                c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta, chat_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                          (partita_id, giocatore_id, 'A', gol.get(nome,0), assist.get(nome,0), int(gol_a>gol_b), int(gol_a==gol_b), int(gol_a<gol_b), chat_id))
             for nome in data['squadra_b']:
-                c.execute('SELECT id FROM giocatori WHERE nome=%s', (nome,))
+                c.execute('SELECT id FROM giocatori WHERE nome=%s AND chat_id=%s', (nome, chat_id))
                 giocatore_id = c.fetchone()[0]
-                c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-                          (partita_id, giocatore_id, 'B', gol.get(nome,0), assist.get(nome,0), int(gol_b>gol_a), int(gol_a==gol_b), int(gol_b<gol_a)))
+                c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta, chat_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                          (partita_id, giocatore_id, 'B', gol.get(nome,0), assist.get(nome,0), int(gol_b>gol_a), int(gol_a==gol_b), int(gol_b<gol_a), chat_id))
 
 def parse_stats(s):
     d = {}
@@ -114,7 +117,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await menu(update, context)
 
 async def giocatori(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    nomi = lista_giocatori()
+    chat_id = update.effective_chat.id
+    nomi = lista_giocatori(chat_id)
     if not nomi:
         await update.message.reply_text("Nessun giocatore registrato. Usa /aggiungi_giocatore per aggiungerli.")
     else:
@@ -130,18 +134,20 @@ async def aggiungi_giocatore(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def aggiungi_giocatore_salva(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_annulla(update.message.text):
         return await annulla(update, context)
+    chat_id = update.effective_chat.id
     testo = update.message.text
     nomi = [n.strip() for n in testo.split(',') if n.strip()]
     if not nomi:
         await update.message.reply_text("Nessun nome valido inserito. Riprova o /annulla.")
         return AGGIUNGI_GIOCATORE
-    aggiungi_giocatori_db(nomi)
+    aggiungi_giocatori_db(nomi, chat_id)
     await update.message.reply_text("✅ Giocatore/i aggiunto/i: " + ", ".join(nomi))
     await menu(update, context)
     return ConversationHandler.END
 
 async def nuova_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    nomi = lista_giocatori()
+    chat_id = update.effective_chat.id
+    nomi = lista_giocatori(chat_id)
     if not nomi:
         await update.message.reply_text("⚠️ Nessun giocatore registrato. Usa prima /aggiungi_giocatore.")
         return ConversationHandler.END
@@ -155,6 +161,7 @@ async def nuova_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SQUADRE
 
 async def squadre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     if is_annulla(update.message.text):
         return await annulla(update, context)
     giocatori_registrati = context.user_data.get('giocatori_registrati', set())
@@ -216,6 +223,7 @@ async def gol(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_annulla(update.message.text):
         return await annulla(update, context)
+    chat_id = update.effective_chat.id
     context.user_data['assist'] = update.message.text
     squadra = set(context.user_data['squadra_a'] + context.user_data['squadra_b'])
     marcatori = set(parse_stats(context.user_data['gol']).keys())
@@ -231,7 +239,7 @@ async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += "Correggi e reinserisci marcatori e assist."
         await update.message.reply_text(msg)
         return ASSIST
-    salva_partita(context.user_data)
+    salva_partita(context.user_data, chat_id)
     await update.message.reply_text(
         "✅ Partita salvata!",
         reply_markup=ReplyKeyboardMarkup([["/menu", "/statistiche"]], resize_keyboard=True, one_time_keyboard=True)
@@ -240,18 +248,19 @@ async def assist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     try:
         with get_conn() as conn:
             with conn.cursor() as c:
-                c.execute('SELECT id, nome FROM giocatori')
+                c.execute('SELECT id, nome FROM giocatori WHERE chat_id = %s', (chat_id,))
                 giocatori = c.fetchall()
                 statistiche = []
                 compagni_dict = {}
                 avversari_dict = {}
 
-                c.execute('SELECT id, data, squadra_a, squadra_b, risultato FROM partite ORDER BY data')
+                c.execute('SELECT id, data, squadra_a, squadra_b, risultato FROM partite WHERE chat_id = %s ORDER BY data', (chat_id,))
                 partite = c.fetchall()
-                c.execute('SELECT partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta FROM prestazioni')
+                c.execute('SELECT partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta FROM prestazioni WHERE chat_id = %s', (chat_id,))
                 prestazioni = c.fetchall()
 
                 partite_map = {p[0]: p for p in partite}
@@ -307,7 +316,7 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 genera_pdf_avanzato([header]+statistiche, filename)
 
                 # --- PDF partite con marcatori e assist ---
-                c.execute("SELECT id, data, squadra_a, squadra_b, risultato FROM partite ORDER BY data")
+                c.execute("SELECT id, data, squadra_a, squadra_b, risultato FROM partite WHERE chat_id = %s ORDER BY data", (chat_id,))
                 partite_rows = c.fetchall()
                 partite_data = []
                 styles = getSampleStyleSheet()
@@ -323,9 +332,9 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     c.execute("""
                         SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra
                         FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id
-                        WHERE partita_id = %s AND (gol > 0 OR assist > 0)
+                        WHERE partita_id = %s AND prestazioni.chat_id = %s AND (gol > 0 OR assist > 0)
                         ORDER BY prestazioni.squadra, giocatori.nome
-                    """, (partita_id,))
+                    """, (partita_id, chat_id))
                     dettaglio = c.fetchall()
                     marcatori = [f"{nome} ({gol})" for nome, gol, assist, sq in dettaglio if gol > 0]
                     assistman = [f"{nome} ({assist})" for nome, gol, assist, sq in dettaglio if assist > 0]
@@ -410,9 +419,10 @@ def genera_pdf_partite(data, filename):
     doc.build(elements)
 
 async def tutte_le_partite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     with get_conn() as conn:
         with conn.cursor() as c:
-            c.execute('SELECT data, squadra_a, squadra_b, risultato FROM partite ORDER BY data')
+            c.execute('SELECT data, squadra_a, squadra_b, risultato FROM partite WHERE chat_id = %s ORDER BY data', (chat_id,))
             partite = c.fetchall()
     if not partite:
         await update.message.reply_text("Nessuna partita registrata.")
@@ -440,6 +450,7 @@ async def partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_annulla(update.message.text):
         return await annulla(update, context)
+    chat_id = update.effective_chat.id
     data_richiesta = update.message.text.strip()
     data_valida = valida_data(data_richiesta)
     if not data_valida:
@@ -447,14 +458,14 @@ async def mostra_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return 20
     with get_conn() as conn:
         with conn.cursor() as c:
-            c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = %s', (data_valida,))
+            c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = %s AND chat_id = %s', (data_valida, chat_id))
             row = c.fetchone()
             if not row:
                 await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
                 await menu(update, context)
                 return ConversationHandler.END
             partita_id, squadra_a, squadra_b, risultato = row
-            c.execute('SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id WHERE partita_id = %s', (partita_id,))
+            c.execute('SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id WHERE partita_id = %s AND prestazioni.chat_id = %s', (partita_id, chat_id))
             dettagli = c.fetchall()
     tabella = [['Nome', 'Squadra', 'Gol', 'Assist']]
     for nome, gol, assist, squadra in dettagli:
@@ -474,6 +485,7 @@ async def elimina_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_annulla(update.message.text):
         return await annulla(update, context)
+    chat_id = update.effective_chat.id
     data_richiesta = update.message.text.strip()
     data_valida = valida_data(data_richiesta)
     if not data_valida:
@@ -481,7 +493,7 @@ async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYP
         return ELIMINA_PARTITA_SELEZIONE
     with get_conn() as conn:
         with conn.cursor() as c:
-            c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = %s', (data_valida,))
+            c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = %s AND chat_id = %s', (data_valida, chat_id))
             partite = c.fetchall()
     if not partite:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
@@ -500,12 +512,13 @@ async def elimina_partita_data(update: Update, context: ContextTypes.DEFAULT_TYP
 async def elimina_partita_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    chat_id = query.message.chat_id
     if query.data.startswith("del_"):
         partita_id = int(query.data.split("_")[1])
         with get_conn() as conn:
             with conn.cursor() as c:
-                c.execute('DELETE FROM prestazioni WHERE partita_id = %s', (partita_id,))
-                c.execute('DELETE FROM partite WHERE id = %s', (partita_id,))
+                c.execute('DELETE FROM prestazioni WHERE partita_id = %s AND chat_id = %s', (partita_id, chat_id))
+                c.execute('DELETE FROM partite WHERE id = %s AND chat_id = %s', (partita_id, chat_id))
         await query.edit_message_text("✅ Partita eliminata.")
         try:
             await menu(update, context)
@@ -519,6 +532,7 @@ async def modifica_partita(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def modifica_partita_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_annulla(update.message.text):
         return await annulla(update, context)
+    chat_id = update.effective_chat.id
     data_richiesta = update.message.text.strip()
     data_valida = valida_data(data_richiesta)
     if not data_valida:
@@ -526,7 +540,7 @@ async def modifica_partita_data(update: Update, context: ContextTypes.DEFAULT_TY
         return MODIFICA_PARTITA_SELEZIONE
     with get_conn() as conn:
         with conn.cursor() as c:
-            c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = %s', (data_valida,))
+            c.execute('SELECT id, squadra_a, squadra_b, risultato FROM partite WHERE data = %s AND chat_id = %s', (data_valida, chat_id))
             partite = c.fetchall()
     if not partite:
         await update.message.reply_text("❌ Nessuna partita trovata per questa data.")
@@ -571,20 +585,21 @@ async def modifica_campo_callback(update: Update, context: ContextTypes.DEFAULT_
 async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_annulla(update.message.text):
         return await annulla(update, context)
+    chat_id = update.effective_chat.id
     campo = context.user_data['campo_modifica']
     partita_id = context.user_data['modifica_id']
     nuovo_valore = update.message.text.strip()
     with get_conn() as conn:
         with conn.cursor() as c:
             if campo in ['squadra_a', 'squadra_b', 'risultato']:
-                c.execute(f'UPDATE partite SET {campo} = %s WHERE id = %s', (nuovo_valore, partita_id))
+                c.execute(f'UPDATE partite SET {campo} = %s WHERE id = %s AND chat_id = %s', (nuovo_valore, partita_id, chat_id))
             elif campo == 'gol' or campo == 'assist':
-                c.execute('SELECT squadra_a, squadra_b, risultato FROM partite WHERE id = %s', (partita_id,))
+                c.execute('SELECT squadra_a, squadra_b, risultato FROM partite WHERE id = %s AND chat_id = %s', (partita_id, chat_id))
                 row = c.fetchone()
                 squadra_a = row[0].split(',')
                 squadra_b = row[1].split(',')
                 risultato = row[2]
-                c.execute('SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id WHERE partita_id = %s', (partita_id,))
+                c.execute('SELECT giocatori.nome, prestazioni.gol, prestazioni.assist, prestazioni.squadra FROM prestazioni JOIN giocatori ON prestazioni.giocatore_id = giocatori.id WHERE partita_id = %s AND prestazioni.chat_id = %s', (partita_id, chat_id))
                 prestazioni = c.fetchall()
                 if campo == 'gol':
                     nuovo_gol = parse_stats(nuovo_valore)
@@ -594,22 +609,22 @@ async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     nuovo_assist = parse_stats(nuovo_valore)
                     gol_esist = {nome: g for nome, g, a, sq in prestazioni}
                     assist_esist = {nome: a for nome, g, a, sq in prestazioni}
-                c.execute('DELETE FROM prestazioni WHERE partita_id = %s', (partita_id,))
+                c.execute('DELETE FROM prestazioni WHERE partita_id = %s AND chat_id = %s', (partita_id, chat_id))
                 gol_a, gol_b = map(int, risultato.split('-'))
                 for nome in squadra_a:
-                    c.execute('SELECT id FROM giocatori WHERE nome=%s', (nome,))
+                    c.execute('SELECT id FROM giocatori WHERE nome=%s AND chat_id=%s', (nome, chat_id))
                     giocatore_id = c.fetchone()[0]
                     g = nuovo_gol.get(nome, gol_esist.get(nome,0)) if campo == 'gol' else gol_esist.get(nome,0)
                     a = nuovo_assist.get(nome, assist_esist.get(nome,0)) if campo == 'assist' else assist_esist.get(nome,0)
-                    c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-                              (partita_id, giocatore_id, 'A', g, a, int(gol_a>gol_b), int(gol_a==gol_b), int(gol_a<gol_b)))
+                    c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta, chat_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                              (partita_id, giocatore_id, 'A', g, a, int(gol_a>gol_b), int(gol_a==gol_b), int(gol_a<gol_b), chat_id))
                 for nome in squadra_b:
-                    c.execute('SELECT id FROM giocatori WHERE nome=%s', (nome,))
+                    c.execute('SELECT id FROM giocatori WHERE nome=%s AND chat_id=%s', (nome, chat_id))
                     giocatore_id = c.fetchone()[0]
                     g = nuovo_gol.get(nome, gol_esist.get(nome,0)) if campo == 'gol' else gol_esist.get(nome,0)
                     a = nuovo_assist.get(nome, assist_esist.get(nome,0)) if campo == 'assist' else assist_esist.get(nome,0)
-                    c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-                              (partita_id, giocatore_id, 'B', g, a, int(gol_b>gol_a), int(gol_a==gol_b), int(gol_b<gol_a)))
+                    c.execute('INSERT INTO prestazioni (partita_id, giocatore_id, squadra, gol, assist, vittoria, pareggio, sconfitta, chat_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                              (partita_id, giocatore_id, 'B', g, a, int(gol_b>gol_a), int(gol_a==gol_b), int(gol_b<gol_a), chat_id))
     await update.message.reply_text("✅ Modifica effettuata.")
     await menu(update, context)
     return ConversationHandler.END
