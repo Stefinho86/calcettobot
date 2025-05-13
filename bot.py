@@ -403,7 +403,17 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Si è verificato un errore nel generare le statistiche: " + str(e))
 
 def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
-    doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=20, leftMargin=20)
+    # Calcolo automatico larghezza colonne
+    from reportlab.lib.pagesizes import landscape, letter
+    PAGE_WIDTH, PAGE_HEIGHT = landscape(letter)
+    margin = 20
+    usable_width = PAGE_WIDTH - 2 * margin
+
+    def get_colwidths(data):
+        n_col = len(data[0])
+        return [usable_width / n_col] * n_col
+
+    doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=margin, leftMargin=margin)
     elements = []
     styles = getSampleStyleSheet()
     table_style = TableStyle([
@@ -419,34 +429,42 @@ def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
     # Statistiche avanzate
     elements.append(Paragraph("Statistiche avanzate calcetto", styles['Title']))
     elements.append(Spacer(1,8))
-    table1 = Table(statistiche, repeatRows=1)
+    table1 = Table(statistiche, repeatRows=1, colWidths=get_colwidths(statistiche))
     table1.setStyle(table_style)
     elements.append(table1)
     elements.append(PageBreak())
     # Cannonieri
     elements.append(Paragraph("Classifica cannonieri", styles['Title']))
     elements.append(Spacer(1,8))
-    table2 = Table(cannonieri, repeatRows=1)
+    table2 = Table(cannonieri, repeatRows=1, colWidths=get_colwidths(cannonieri))
     table2.setStyle(table_style)
     elements.append(table2)
     elements.append(PageBreak())
     # Assistman
     elements.append(Paragraph("Classifica assistman", styles['Title']))
     elements.append(Spacer(1,8))
-    table3 = Table(assistman, repeatRows=1)
+    table3 = Table(assistman, repeatRows=1, colWidths=get_colwidths(assistman))
     table3.setStyle(table_style)
     elements.append(table3)
     elements.append(PageBreak())
     # Presenze
     elements.append(Paragraph("Classifica presenze", styles['Title']))
     elements.append(Spacer(1,8))
-    table4 = Table(presenze, repeatRows=1)
+    table4 = Table(presenze, repeatRows=1, colWidths=get_colwidths(presenze))
     table4.setStyle(table_style)
     elements.append(table4)
     doc.build(elements)
 
 def genera_pdf_partite(data, filename):
-    doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=20, leftMargin=20)
+    # Calcolo automatico larghezza colonne
+    from reportlab.lib.pagesizes import landscape, letter
+    PAGE_WIDTH, PAGE_HEIGHT = landscape(letter)
+    margin = 20
+    usable_width = PAGE_WIDTH - 2 * margin
+    n_col = len(data[0])
+    colWidths = [usable_width / n_col] * n_col
+
+    doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=margin, leftMargin=margin)
     style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
         ('TEXTCOLOR',(0,0),(-1,0),colors.black),
@@ -460,7 +478,7 @@ def genera_pdf_partite(data, filename):
     table = Table(
         data,
         repeatRows=1,
-        colWidths=None,
+        colWidths=colWidths,
         splitByRow=1
     )
     table.setStyle(style)
