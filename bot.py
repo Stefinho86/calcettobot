@@ -305,8 +305,20 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     compagni_top = ', '.join([f"{n} ({c})" for n,c in compagni_dict[nome]]) if compagni_dict[nome] else "-"
                     avversari_top = ', '.join([f"{n} ({c})" for n,c in avversari_dict[nome]]) if avversari_dict[nome] else "-"
                     statistiche.append([
-                        nome, presenze, gol_tot, media_gol, assist_tot, media_assist,
-                        vittorie, perc_vittorie, pareggi, perc_pareggi, sconfitte, perc_sconfitte, compagni_top, avversari_top
+                        str(nome),
+                        str(presenze),
+                        str(gol_tot),
+                        str(media_gol),
+                        str(assist_tot),
+                        str(media_assist),
+                        str(vittorie),
+                        str(perc_vittorie),
+                        str(pareggi),
+                        str(perc_pareggi),
+                        str(sconfitte),
+                        str(perc_sconfitte),
+                        str(compagni_top),
+                        str(avversari_top)
                     ])
                 header = [
                     "Nome", "Pres.", "Gol", "Media Gol", "Assist", "Media Assist",
@@ -318,22 +330,22 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 classifica_gol = []
                 for gid, nome in giocatori:
                     tot_gol = sum(p[3] for p in giocatore_partite[gid])
-                    classifica_gol.append([nome, tot_gol])
-                classifica_gol.sort(key=lambda x: (-x[1], x[0]))
+                    classifica_gol.append([str(len(classifica_gol)+1), str(nome), str(tot_gol)])
+                classifica_gol.sort(key=lambda x: (-int(x[2]), x[1]))
 
                 # CLASSIFICA ASSISTMAN
                 classifica_assist = []
                 for gid, nome in giocatori:
                     tot_assist = sum(p[4] for p in giocatore_partite[gid])
-                    classifica_assist.append([nome, tot_assist])
-                classifica_assist.sort(key=lambda x: (-x[1], x[0]))
+                    classifica_assist.append([str(len(classifica_assist)+1), str(nome), str(tot_assist)])
+                classifica_assist.sort(key=lambda x: (-int(x[2]), x[1]))
 
                 # CLASSIFICA PRESENZE
                 classifica_presenze = []
                 for gid, nome in giocatori:
                     presenze = len(giocatore_partite[gid])
-                    classifica_presenze.append([nome, presenze])
-                classifica_presenze.sort(key=lambda x: (-x[1], x[0]))
+                    classifica_presenze.append([str(len(classifica_presenze)+1), str(nome), str(presenze)])
+                classifica_presenze.sort(key=lambda x: (-int(x[2]), x[1]))
 
                 filename = "statistiche_avanzate.pdf"
                 genera_pdf_multi(
@@ -410,11 +422,11 @@ def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
 
     # Larghezze proporzionali per la tabella principale (statistiche avanzate)
     stat_col_weights = [
-        2.5,  # Nome
-        0.8,  # Pres.
-        0.8,  # Gol
+        2.8,  # Nome
+        0.9,  # Pres.
+        0.9,  # Gol
         1.0,  # Media Gol
-        0.8,  # Assist
+        0.9,  # Assist
         1.0,  # Media Assist
         1.0,  # Vittorie
         1.0,  # %Vitt
@@ -422,8 +434,8 @@ def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
         1.0,  # %Par
         1.0,  # Sconfitte
         1.0,  # %Sco
-        2.0,  # Top Compagni
-        2.0,  # Top Avversari
+        2.1,  # Top Compagni
+        2.1,  # Top Avversari
     ]
     stat_col_weights = stat_col_weights[:len(statistiche[0])]
     stat_col_sum = sum(stat_col_weights)
