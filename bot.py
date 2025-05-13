@@ -20,7 +20,7 @@ from telegram.ext import (
     ContextTypes
 )
 from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib import colors
@@ -270,6 +270,7 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for pr in prestazioni:
                     giocatore_partite[pr[1]].append(pr)  # pr[1]=giocatore_id
 
+                # Avanzate
                 for gid, nome in giocatori:
                     compagni = Counter()
                     avversari = Counter()
@@ -312,8 +313,36 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Vittorie", "%Vitt", "Pareggi", "%Par", "Sconfitte", "%Sco",
                     "Top Compagni", "Top Avversari"
                 ]
+
+                # CLASSIFICA CANNONIERI
+                classifica_gol = []
+                for gid, nome in giocatori:
+                    tot_gol = sum(p[3] for p in giocatore_partite[gid])
+                    classifica_gol.append([nome, tot_gol])
+                classifica_gol.sort(key=lambda x: (-x[1], x[0]))
+
+                # CLASSIFICA ASSISTMAN
+                classifica_assist = []
+                for gid, nome in giocatori:
+                    tot_assist = sum(p[4] for p in giocatore_partite[gid])
+                    classifica_assist.append([nome, tot_assist])
+                classifica_assist.sort(key=lambda x: (-x[1], x[0]))
+
+                # CLASSIFICA PRESENZE
+                classifica_presenze = []
+                for gid, nome in giocatori:
+                    presenze = len(giocatore_partite[gid])
+                    classifica_presenze.append([nome, presenze])
+                classifica_presenze.sort(key=lambda x: (-x[1], x[0]))
+
                 filename = "statistiche_avanzate.pdf"
-                genera_pdf_avanzato([header]+statistiche, filename)
+                genera_pdf_multi(
+                    [header]+statistiche,
+                    [["Pos", "Giocatore", "Gol"]] + [[i+1, n, g] for i, (n, g) in enumerate(classifica_gol)],
+                    [["Pos", "Giocatore", "Assist"]] + [[i+1, n, a] for i, (n, a) in enumerate(classifica_assist)],
+                    [["Pos", "Giocatore", "Presenze"]] + [[i+1, n, p] for i, (n, p) in enumerate(classifica_presenze)],
+                    filename
+                )
 
                 # --- PDF partite con marcatori e assist ---
                 c.execute("SELECT id, data, squadra_a, squadra_b, risultato FROM partite WHERE chat_id = %s ORDER BY data", (chat_id,))
@@ -363,7 +392,7 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await update.message.reply_document(
             document=InputFile(open(filename, "rb"), filename=filename),
-            caption="📊 Statistiche avanzate calcetto"
+            caption="📊 Statistiche avanzate, cannonieri, assistman e presenze"
         )
         await update.message.reply_document(
             document=InputFile(open(partite_pdf_filename, "rb"), filename=partite_pdf_filename),
@@ -373,9 +402,11 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("[ERRORE]", e)
         await update.message.reply_text("Si è verificato un errore nel generare le statistiche: " + str(e))
 
-def genera_pdf_avanzato(data, filename):
-    doc = SimpleDocTemplate(filename, pagesize=landscape(letter))
-    style = TableStyle([
+def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
+    doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=20, leftMargin=20)
+    elements = []
+    styles = getSampleStyleSheet()
+    table_style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
         ('TEXTCOLOR',(0,0),(-1,0),colors.black),
         ('ALIGN',(0,0),(-1,-1),'CENTER'),
@@ -385,12 +416,33 @@ def genera_pdf_avanzato(data, filename):
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
     ])
-    table = Table(data, repeatRows=1)
-    table.setStyle(style)
-    elements = []
-    elements.append(Paragraph("Statistiche avanzate calcetto", getSampleStyleSheet()['Title']))
+    # Statistiche avanzate
+    elements.append(Paragraph("Statistiche avanzate calcetto", styles['Title']))
     elements.append(Spacer(1,8))
-    elements.append(table)
+    table1 = Table(statistiche, repeatRows=1)
+    table1.setStyle(table_style)
+    elements.append(table1)
+    elements.append(PageBreak())
+    # Cannonieri
+    elements.append(Paragraph("Classifica cannonieri", styles['Title']))
+    elements.append(Spacer(1,8))
+    table2 = Table(cannonieri, repeatRows=1)
+    table2.setStyle(table_style)
+    elements.append(table2)
+    elements.append(PageBreak())
+    # Assistman
+    elements.append(Paragraph("Classifica assistman", styles['Title']))
+    elements.append(Spacer(1,8))
+    table3 = Table(assistman, repeatRows=1)
+    table3.setStyle(table_style)
+    elements.append(table3)
+    elements.append(PageBreak())
+    # Presenze
+    elements.append(Paragraph("Classifica presenze", styles['Title']))
+    elements.append(Spacer(1,8))
+    table4 = Table(presenze, repeatRows=1)
+    table4.setStyle(table_style)
+    elements.append(table4)
     doc.build(elements)
 
 def genera_pdf_partite(data, filename):
@@ -408,7 +460,7 @@ def genera_pdf_partite(data, filename):
     table = Table(
         data,
         repeatRows=1,
-        colWidths=[55, 100, 100, 55, None, None],
+        colWidths=None,
         splitByRow=1
     )
     table.setStyle(style)
