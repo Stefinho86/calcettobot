@@ -403,15 +403,38 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Si è verificato un errore nel generare le statistiche: " + str(e))
 
 def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
-    # Calcolo automatico larghezza colonne
     from reportlab.lib.pagesizes import landscape, letter
     PAGE_WIDTH, PAGE_HEIGHT = landscape(letter)
     margin = 20
     usable_width = PAGE_WIDTH - 2 * margin
 
-    def get_colwidths(data):
-        n_col = len(data[0])
-        return [usable_width / n_col] * n_col
+    # Larghezze proporzionali per la tabella principale (statistiche avanzate)
+    stat_col_weights = [
+        2.5,  # Nome
+        0.8,  # Pres.
+        0.8,  # Gol
+        1.0,  # Media Gol
+        0.8,  # Assist
+        1.0,  # Media Assist
+        1.0,  # Vittorie
+        1.0,  # %Vitt
+        1.0,  # Pareggi
+        1.0,  # %Par
+        1.0,  # Sconfitte
+        1.0,  # %Sco
+        2.0,  # Top Compagni
+        2.0,  # Top Avversari
+    ]
+    stat_col_weights = stat_col_weights[:len(statistiche[0])]
+    stat_col_sum = sum(stat_col_weights)
+    stat_colwidths = [w / stat_col_sum * usable_width for w in stat_col_weights]
+
+    # Tabelle classifica: col 1 stretta, col 2 media, col 3 stretta
+    def classifica_colwidths(data):
+        if len(data[0]) == 3:
+            return [usable_width * 0.15, usable_width * 0.55, usable_width * 0.3]
+        else:
+            return [usable_width / len(data[0])] * len(data[0])
 
     doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=margin, leftMargin=margin)
     elements = []
@@ -426,43 +449,54 @@ def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
     ])
+
     # Statistiche avanzate
     elements.append(Paragraph("Statistiche avanzate calcetto", styles['Title']))
     elements.append(Spacer(1,8))
-    table1 = Table(statistiche, repeatRows=1, colWidths=get_colwidths(statistiche))
+    table1 = Table(statistiche, repeatRows=1, colWidths=stat_colwidths)
     table1.setStyle(table_style)
     elements.append(table1)
     elements.append(PageBreak())
     # Cannonieri
     elements.append(Paragraph("Classifica cannonieri", styles['Title']))
     elements.append(Spacer(1,8))
-    table2 = Table(cannonieri, repeatRows=1, colWidths=get_colwidths(cannonieri))
+    table2 = Table(cannonieri, repeatRows=1, colWidths=classifica_colwidths(cannonieri))
     table2.setStyle(table_style)
     elements.append(table2)
     elements.append(PageBreak())
     # Assistman
     elements.append(Paragraph("Classifica assistman", styles['Title']))
     elements.append(Spacer(1,8))
-    table3 = Table(assistman, repeatRows=1, colWidths=get_colwidths(assistman))
+    table3 = Table(assistman, repeatRows=1, colWidths=classifica_colwidths(assistman))
     table3.setStyle(table_style)
     elements.append(table3)
     elements.append(PageBreak())
     # Presenze
     elements.append(Paragraph("Classifica presenze", styles['Title']))
     elements.append(Spacer(1,8))
-    table4 = Table(presenze, repeatRows=1, colWidths=get_colwidths(presenze))
+    table4 = Table(presenze, repeatRows=1, colWidths=classifica_colwidths(presenze))
     table4.setStyle(table_style)
     elements.append(table4)
     doc.build(elements)
 
 def genera_pdf_partite(data, filename):
-    # Calcolo automatico larghezza colonne
     from reportlab.lib.pagesizes import landscape, letter
     PAGE_WIDTH, PAGE_HEIGHT = landscape(letter)
     margin = 20
     usable_width = PAGE_WIDTH - 2 * margin
     n_col = len(data[0])
-    colWidths = [usable_width / n_col] * n_col
+    # Prima colonna (data) stretta, le due squadre larghe, risultato stretto, marcatori e assist più larghi
+    if n_col == 6:
+        colWidths = [
+            usable_width * 0.12,   # Data
+            usable_width * 0.19,   # Squadra A
+            usable_width * 0.19,   # Squadra B
+            usable_width * 0.11,   # Risultato
+            usable_width * 0.19,   # Marcatori
+            usable_width * 0.20    # Assistman
+        ]
+    else:
+        colWidths = [usable_width / n_col] * n_col
 
     doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=margin, leftMargin=margin)
     style = TableStyle([
