@@ -419,113 +419,164 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def genera_pdf_multi(statistiche, cannonieri, assistman, presenze, filename):
     from reportlab.lib.pagesizes import landscape, letter
+    from reportlab.platypus import Table, TableStyle, SimpleDocTemplate, Paragraph, Spacer, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib import colors
+
     PAGE_WIDTH, PAGE_HEIGHT = landscape(letter)
     margin = 20
     usable_width = PAGE_WIDTH - 2 * margin
 
-    # Larghezze proporzionali per la tabella principale (statistiche avanzate)
-    stat_col_weights = [
-        2.8,  # Nome
-        0.9,  # Pres.
-        0.9,  # Gol
-        1.0,  # Media Gol
-        0.9,  # Assist
-        1.0,  # Media Assist
-        1.0,  # Vittorie
-        1.0,  # %Vitt
-        1.0,  # Pareggi
-        1.0,  # %Par
-        1.0,  # Sconfitte
-        1.0,  # %Sco
-        2.1,  # Top Compagni
-        2.1,  # Top Avversari
-    ]
-    stat_col_weights = stat_col_weights[:len(statistiche[0])]
-    stat_col_sum = sum(stat_col_weights)
-    stat_colwidths = [w / stat_col_sum * usable_width for w in stat_col_weights]
+    # Calcolo larghezza colonne statistiche: le ultime due colonne sono più larghe
+    n_stat_col = len(statistiche[0])
+    base_col_width = (usable_width - 2*120) / (n_stat_col - 2)  # lascia 120px per ciascuna colonna lunga
+    stat_colwidths = [base_col_width for _ in range(n_stat_col)]
+    stat_colwidths[-2] = 120
+    stat_colwidths[-1] = 120
 
-    # Tabelle classifica: col 1 stretta, col 2 media, col 3 stretta
+    styles = getSampleStyleSheet()
+    para_style = ParagraphStyle(
+        'MyStyle',
+        fontName='Helvetica',
+        fontSize=8,
+        leading=9,
+        alignment=TA_LEFT
+    )
+
+    # Wrappa tutte le celle di statistiche
+    def wrap_stat_rows(rows):
+        wrapped = []
+        for i, row in enumerate(rows):
+            new_row = []
+            for j, cell in enumerate(row):
+                # Header: normale
+                if i == 0:
+                    new_row.append(Paragraph(str(cell), styles['Heading6']))
+                else:
+                    # Ultime due colonne: wrap obbligatorio
+                    if j >= n_stat_col-2:
+                        new_row.append(Paragraph(str(cell).replace(", ", ",<br/>"), para_style))
+                    else:
+                        new_row.append(Paragraph(str(cell), para_style))
+            wrapped.append(new_row)
+        return wrapped
+
+    # Classifiche: larghezze fisse e centrate
     def classifica_colwidths(data):
         if len(data[0]) == 3:
-            return [usable_width * 0.15, usable_width * 0.55, usable_width * 0.3]
+            return [usable_width * 0.17, usable_width * 0.53, usable_width * 0.3]
         else:
             return [usable_width / len(data[0])] * len(data[0])
 
+    def wrap_classifica(rows):
+        wrapped = []
+        for i, row in enumerate(rows):
+            wrapped.append([Paragraph(str(x), styles['Heading6'] if i==0 else para_style) for x in row])
+        return wrapped
+
     doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=margin, leftMargin=margin)
     elements = []
-    styles = getSampleStyleSheet()
+
     table_style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
         ('TEXTCOLOR',(0,0),(-1,0),colors.black),
-        ('ALIGN',(0,0),(-1,-1),'CENTER'),
+        ('ALIGN',(0,0),(-1,0),'CENTER'),
+        ('ALIGN',(0,1),(-1,-1),'LEFT'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE', (0,0), (-1,0), 9),
         ('FONTSIZE', (0,1), (-1,-1), 8),
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('LEFTPADDING', (0,0), (-1,-1), 3),
+        ('RIGHTPADDING', (0,0), (-1,-1), 3),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
     ])
 
     # Statistiche avanzate
     elements.append(Paragraph("Statistiche avanzate calcetto", styles['Title']))
     elements.append(Spacer(1,8))
-    table1 = Table(statistiche, repeatRows=1, colWidths=stat_colwidths)
+    table1 = Table(wrap_stat_rows(statistiche), repeatRows=1, colWidths=stat_colwidths)
     table1.setStyle(table_style)
     elements.append(table1)
     elements.append(PageBreak())
+
     # Cannonieri
     elements.append(Paragraph("Classifica cannonieri", styles['Title']))
     elements.append(Spacer(1,8))
-    table2 = Table(cannonieri, repeatRows=1, colWidths=classifica_colwidths(cannonieri))
+    table2 = Table(wrap_classifica(cannonieri), repeatRows=1, colWidths=classifica_colwidths(cannonieri))
     table2.setStyle(table_style)
     elements.append(table2)
     elements.append(PageBreak())
+
     # Assistman
     elements.append(Paragraph("Classifica assistman", styles['Title']))
     elements.append(Spacer(1,8))
-    table3 = Table(assistman, repeatRows=1, colWidths=classifica_colwidths(assistman))
+    table3 = Table(wrap_classifica(assistman), repeatRows=1, colWidths=classifica_colwidths(assistman))
     table3.setStyle(table_style)
     elements.append(table3)
     elements.append(PageBreak())
+
     # Presenze
     elements.append(Paragraph("Classifica presenze", styles['Title']))
     elements.append(Spacer(1,8))
-    table4 = Table(presenze, repeatRows=1, colWidths=classifica_colwidths(presenze))
+    table4 = Table(wrap_classifica(presenze), repeatRows=1, colWidths=classifica_colwidths(presenze))
     table4.setStyle(table_style)
     elements.append(table4)
     doc.build(elements)
 
 def genera_pdf_partite(data, filename):
     from reportlab.lib.pagesizes import landscape, letter
+    from reportlab.platypus import Table, TableStyle, SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib import colors
+
     PAGE_WIDTH, PAGE_HEIGHT = landscape(letter)
     margin = 20
     usable_width = PAGE_WIDTH - 2 * margin
     n_col = len(data[0])
-    # Prima colonna (data) stretta, le due squadre larghe, risultato stretto, marcatori e assist più larghi
     if n_col == 6:
         colWidths = [
-            usable_width * 0.12,   # Data
+            usable_width * 0.13,   # Data
             usable_width * 0.19,   # Squadra A
             usable_width * 0.19,   # Squadra B
             usable_width * 0.11,   # Risultato
             usable_width * 0.19,   # Marcatori
-            usable_width * 0.20    # Assistman
+            usable_width * 0.19    # Assistman
         ]
     else:
         colWidths = [usable_width / n_col] * n_col
+
+    styles = getSampleStyleSheet()
+    para_style = ParagraphStyle(
+        'MyStyle',
+        fontName='Helvetica',
+        fontSize=8,
+        leading=9,
+        alignment=TA_LEFT
+    )
+
+    def wrap_row(row):
+        return [Paragraph(str(cell).replace(", ", ",<br/>"), para_style) if isinstance(cell, str) else cell for cell in row]
+
+    data_wrapped = [wrap_row(row) for row in data]
 
     doc = SimpleDocTemplate(filename, pagesize=landscape(letter), rightMargin=margin, leftMargin=margin)
     style = TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
         ('TEXTCOLOR',(0,0),(-1,0),colors.black),
-        ('ALIGN',(0,0),(-1,-1),'LEFT'),
+        ('ALIGN',(0,0),(-1,0),'CENTER'),
+        ('ALIGN',(0,1),(-1,-1),'LEFT'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE', (0,0), (-1,0), 9),
         ('FONTSIZE', (0,1), (-1,-1), 8),
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('LEFTPADDING', (0,0), (-1,-1), 3),
+        ('RIGHTPADDING', (0,0), (-1,-1), 3),
         ('GRID', (0,0), (-1,-1), 0.5, colors.grey)
     ])
     table = Table(
-        data,
+        data_wrapped,
         repeatRows=1,
         colWidths=colWidths,
         splitByRow=1
