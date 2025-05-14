@@ -330,29 +330,32 @@ async def statistiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 classifica_gol = []
                 for gid, nome in giocatori:
                     tot_gol = sum(p[3] for p in giocatore_partite[gid])
-                    classifica_gol.append([str(len(classifica_gol)+1), str(nome), str(tot_gol)])
-                classifica_gol.sort(key=lambda x: (-int(x[2]), x[1]))
+                    classifica_gol.append((nome, tot_gol))
+                classifica_gol.sort(key=lambda x: (-x[1], x[0]))
+                cannonieri = [["Pos", "Giocatore", "Gol"]] + [[str(i+1), n, str(g)] for i, (n, g) in enumerate(classifica_gol)]
 
                 # CLASSIFICA ASSISTMAN
                 classifica_assist = []
                 for gid, nome in giocatori:
                     tot_assist = sum(p[4] for p in giocatore_partite[gid])
-                    classifica_assist.append([str(len(classifica_assist)+1), str(nome), str(tot_assist)])
-                classifica_assist.sort(key=lambda x: (-int(x[2]), x[1]))
+                    classifica_assist.append((nome, tot_assist))
+                classifica_assist.sort(key=lambda x: (-x[1], x[0]))
+                assistman = [["Pos", "Giocatore", "Assist"]] + [[str(i+1), n, str(a)] for i, (n, a) in enumerate(classifica_assist)]
 
                 # CLASSIFICA PRESENZE
                 classifica_presenze = []
                 for gid, nome in giocatori:
                     presenze = len(giocatore_partite[gid])
-                    classifica_presenze.append([str(len(classifica_presenze)+1), str(nome), str(presenze)])
-                classifica_presenze.sort(key=lambda x: (-int(x[2]), x[1]))
+                    classifica_presenze.append((nome, presenze))
+                classifica_presenze.sort(key=lambda x: (-x[1], x[0]))
+                presenze_tab = [["Pos", "Giocatore", "Presenze"]] + [[str(i+1), n, str(p)] for i, (n, p) in enumerate(classifica_presenze)]
 
                 filename = "statistiche_avanzate.pdf"
                 genera_pdf_multi(
                     [header]+statistiche,
-                    [["Pos", "Giocatore", "Gol"]] + [[i+1, n, g] for i, (n, g) in enumerate(classifica_gol)],
-                    [["Pos", "Giocatore", "Assist"]] + [[i+1, n, a] for i, (n, a) in enumerate(classifica_assist)],
-                    [["Pos", "Giocatore", "Presenze"]] + [[i+1, n, p] for i, (n, p) in enumerate(classifica_presenze)],
+                    cannonieri,
+                    assistman,
+                    presenze_tab,
                     filename
                 )
 
