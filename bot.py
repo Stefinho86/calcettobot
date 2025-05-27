@@ -801,8 +801,7 @@ async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Ferma tutte le conversazioni e torna al menu
-    await update.message.reply_text(
-        "Operazione annullata e stato del bot resettato. Sei tornato al menù principale.",
+    await update.message.reply_text("Operazione annullata e stato del bot resettato. Sei tornato al menù principale.",
         reply_markup=ReplyKeyboardMarkup([
             [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
             [KeyboardButton("/partite"), KeyboardButton("/partita")],
