@@ -112,6 +112,18 @@ async def annulla(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ], resize_keyboard=True)
     )
     return ConversationHandler.END
+    
+async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Operazione annullata e stato del bot resettato. Sei tornato al menù principale.",
+        reply_markup=ReplyKeyboardMarkup([
+            [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
+            [KeyboardButton("/partite"), KeyboardButton("/partita")],
+            [KeyboardButton("/giocatori"), KeyboardButton("/aggiungi_giocatore")],
+            [KeyboardButton("/modifica_partita"), KeyboardButton("/elimina_partita")]
+        ], resize_keyboard=True)
+    )
+    return ConversationHandler.END    
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await menu(update, context)
@@ -797,18 +809,6 @@ async def modifica_valore(update: Update, context: ContextTypes.DEFAULT_TYPE):
                               (partita_id, giocatore_id, 'B', g, a, int(gol_b>gol_a), int(gol_a==gol_b), int(gol_b<gol_a), chat_id))
     await update.message.reply_text("✅ Modifica effettuata.")
     await menu(update, context)
-    return ConversationHandler.END
-    
-    async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Ferma tutte le conversazioni e torna al menu
-    await update.message.reply_text("Operazione annullata e stato del bot resettato. Sei tornato al menù principale.",
-        reply_markup=ReplyKeyboardMarkup([
-            [KeyboardButton("/nuovapartita"), KeyboardButton("/statistiche")],
-            [KeyboardButton("/partite"), KeyboardButton("/partita")],
-            [KeyboardButton("/giocatori"), KeyboardButton("/aggiungi_giocatore")],
-            [KeyboardButton("/modifica_partita"), KeyboardButton("/elimina_partita")]
-        ], resize_keyboard=True)
-    )
     return ConversationHandler.END
 
 def main():
